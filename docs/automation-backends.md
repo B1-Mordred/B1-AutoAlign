@@ -59,8 +59,8 @@ Accordingly, the software side is ready but neither capture path is complete unt
 2. Record camera scale/FOV and use them as solve hints.
 3. Implement and validate the three solved-frame polar-axis measurement with controlled RA rotation.
 4. Verify the computed ALT/AZ correction signs against tiny supervised physical movements.
-5. Expose the controller through the upstream INDI PAC interface on a compatible KStars/INDI stack, or keep corrections inside the desktop app.
-6. Add correction magnitude, soft-limit, timeout, no-improvement and abort guards.
+5. Map the firmware's bounded atomic `PAC<azDeg>,<altDeg>` command to the upstream INDI PAC interface on a compatible KStars/INDI stack, or keep corrections inside the desktop app.
+6. Add closed-loop no-improvement, direction-flip and retry guards in the application; magnitude, soft-limit, timeout and abort guards now exist in firmware v0.2.0.
 7. Only then unlock closed-loop motor correction.
 
 This sequencing is deliberate: a successful plate solve is not proof that motor direction, mechanical clearance, backlash or loaded stopping is safe.

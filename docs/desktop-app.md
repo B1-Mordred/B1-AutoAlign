@@ -12,6 +12,9 @@ The B1-AutoAlign Control Center is a native PyQt6 application for Linux. It keep
 - set both logical coordinates to zero;
 - mark the physical ALT bottom and upper soft limit;
 - clear the upper ALT limit;
+- mark and clear the AZ lower/upper soft limits;
+- configure release, timed and continuous motor holding;
+- show correction-limit readiness and live driver-enable state;
 - store ALT and AZ steps-per-arcminute calibration;
 - detect and prefer an available Ekos/KStars capture-and-solve backend;
 - fall back to a standard INDI camera plus local Astrometry.net;
@@ -23,6 +26,8 @@ The B1-AutoAlign Control Center is a native PyQt6 application for Linux. It keep
 Full controls are enabled only when `:GVP#` returns `B1-AutoAlign`. An older controller such as `OpenAstroMount V1.13.16` can be connected for position/status inspection, but the application keeps all movement controls—including STOP—disabled.
 
 This is intentional: the legacy V1.13.16 controller previously crashed when sent the generic `:Q#` stop command. B1-AutoAlign implements a safe `:Q#` path.
+
+Firmware v0.2.0 keeps motor torque according to the configured holding policy after STOP. The explicit **Release idle drivers** operation requires confirmation because releasing torque may permit a heavy load to back-drive the mechanism.
 
 ## Run from the checkout
 

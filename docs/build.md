@@ -7,6 +7,7 @@ The validated toolchain is:
 - Arduino CLI 1.2.2
 - ESP32 Arduino core 3.3.12
 - board target `esp32:esp32:esp32`
+- a C++17 compiler for the executable host-side motion test
 - no third-party Arduino libraries
 
 For Python tooling on a machine with pip available:

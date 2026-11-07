@@ -16,6 +16,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "MotionAxis.h"
+
 namespace Config
 {
 constexpr uint32_t SERIAL_BAUD = 19200;
@@ -43,7 +45,15 @@ constexpr float ALT_ACCEL     = 500.0f;
 constexpr float AZ_ACCEL      = 500.0f;
 constexpr float START_SPEED   = 40.0f;
 constexpr uint32_t STEP_PULSE_US = 3;
-constexpr uint32_t DISABLE_DELAY_MS = 250;
+constexpr uint32_t MOTION_TIMEOUT_MS = 180000;
+constexpr uint32_t DEFAULT_HOLD_DELAY_MS = 5000;
+constexpr uint32_t MAX_HOLD_DELAY_MS = 600000;
+constexpr HoldMode DEFAULT_HOLD_MODE = HoldMode::Always;
+
+constexpr float MAX_ALT_COMMAND_ARCMIN = 140.0f;
+constexpr float MAX_AZ_COMMAND_ARCMIN = 320.0f;
+constexpr int32_t MAX_RAW_JOG_STEPS = 100000;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 2;
 
 // Migration defaults measured with the currently installed V1.13.16 setup.
 // Calibrate these against real angular movement before automated alignment.
@@ -56,170 +66,23 @@ constexpr float DEFAULT_AZ_STEPS_PER_ARCMIN  = 11.0f;
 constexpr int32_t DEFAULT_ALT_MIN = 0;
 }  // namespace Config
 
-enum class MoveResult : uint8_t
-{
-    Accepted,
-    MinLimit,
-    MaxLimit,
-    Busy
-};
-
-class StepDirAxis
-{
-  public:
-    StepDirAxis(const char *axisName, uint8_t stepPin, uint8_t dirPin, uint8_t enablePin, bool invertDirection,
-                float maxStepRate, float acceleration)
-        : name(axisName), step(stepPin), dir(dirPin), enable(enablePin), invertDir(invertDirection),
-          maxSpeed(maxStepRate), accel(acceleration)
-    {
-    }
-
-    void begin(int32_t savedPosition)
-    {
-        pinMode(step, OUTPUT);
-        pinMode(dir, OUTPUT);
-        pinMode(enable, OUTPUT);
-        digitalWrite(step, LOW);
-        setDriverEnabled(false);
-        current = savedPosition;
-        target  = savedPosition;
-    }
-
-    void setLimits(bool minimumEnabled, int32_t minimum, bool maximumEnabled, int32_t maximum)
-    {
-        minEnabled = minimumEnabled;
-        minPosition = minimum;
-        maxEnabled = maximumEnabled;
-        maxPosition = maximum;
-    }
-
-    MoveResult moveTo(int32_t requested)
-    {
-        if (isMoving())
-            return MoveResult::Busy;
-        if (minEnabled && requested < minPosition)
-            return MoveResult::MinLimit;
-        if (maxEnabled && requested > maxPosition)
-            return MoveResult::MaxLimit;
-        target = requested;
-        if (target != current)
-        {
-            speed = Config::START_SPEED;
-            lastStepUs = micros();
-            setDriverEnabled(true);
-        }
-        return MoveResult::Accepted;
-    }
-
-    MoveResult moveBy(int32_t delta)
-    {
-        const int64_t requested = static_cast<int64_t>(current) + delta;
-        if (requested < INT32_MIN || requested > INT32_MAX)
-            return delta < 0 ? MoveResult::MinLimit : MoveResult::MaxLimit;
-        return moveTo(static_cast<int32_t>(requested));
-    }
-
-    void stopNow()
-    {
-        target = current;
-        speed = 0.0f;
-        lastMotionMs = millis();
-        setDriverEnabled(false);
-    }
-
-    void setCurrentPosition(int32_t value)
-    {
-        current = value;
-        target = value;
-        speed = 0.0f;
-        lastMotionMs = millis();
-    }
-
-    bool service(uint32_t nowUs)
-    {
-        if (!isMoving())
-        {
-            if (driverEnabled && millis() - lastMotionMs >= Config::DISABLE_DELAY_MS)
-                setDriverEnabled(false);
-            return false;
-        }
-
-        const int64_t remaining = static_cast<int64_t>(target) - current;
-        const uint32_t interval = static_cast<uint32_t>(1000000.0f / fmaxf(speed, Config::START_SPEED));
-        if (static_cast<uint32_t>(nowUs - lastStepUs) < interval)
-            return false;
-
-        const int8_t sign = remaining > 0 ? 1 : -1;
-        const bool directionLevel = (sign > 0) ^ invertDir;
-        digitalWrite(dir, directionLevel ? HIGH : LOW);
-        digitalWrite(step, HIGH);
-        delayMicroseconds(Config::STEP_PULSE_US);
-        digitalWrite(step, LOW);
-
-        current += sign;
-        lastStepUs = nowUs;
-        lastMotionMs = millis();
-
-        const uint64_t left = static_cast<uint64_t>(remaining > 0 ? remaining - 1 : -remaining - 1);
-        const float stoppingSteps = (speed * speed) / (2.0f * accel);
-        if (left == 0)
-        {
-            speed = 0.0f;
-            return true;
-        }
-        if (static_cast<float>(left) <= stoppingSteps)
-            speed = sqrtf(fmaxf(Config::START_SPEED * Config::START_SPEED, speed * speed - 2.0f * accel));
-        else
-            speed = fminf(maxSpeed, sqrtf(speed * speed + 2.0f * accel));
-        return true;
-    }
-
-    bool isMoving() const { return current != target; }
-    int32_t position() const { return current; }
-    int32_t targetPosition() const { return target; }
-    int32_t minimum() const { return minPosition; }
-    int32_t maximum() const { return maxPosition; }
-    bool hasMinimum() const { return minEnabled; }
-    bool hasMaximum() const { return maxEnabled; }
-    const char *axisName() const { return name; }
-
-  private:
-    void setDriverEnabled(bool on)
-    {
-        driverEnabled = on;
-        const bool outputLevel = Config::ENABLE_ACTIVE_LOW ? !on : on;
-        digitalWrite(enable, outputLevel ? HIGH : LOW);
-    }
-
-    const char *name;
-    uint8_t step;
-    uint8_t dir;
-    uint8_t enable;
-    bool invertDir;
-    float maxSpeed;
-    float accel;
-    float speed = 0.0f;
-    int32_t current = 0;
-    int32_t target = 0;
-    int32_t minPosition = 0;
-    int32_t maxPosition = 0;
-    bool minEnabled = false;
-    bool maxEnabled = false;
-    bool driverEnabled = false;
-    uint32_t lastStepUs = 0;
-    uint32_t lastMotionMs = 0;
-};
-
 Preferences preferences;
 StepDirAxis altitude("ALT", Config::ALT_STEP_PIN, Config::ALT_DIR_PIN, Config::ALT_EN_PIN, Config::ALT_DIR_INVERT,
-                     Config::ALT_MAX_SPEED, Config::ALT_ACCEL);
+                     Config::ENABLE_ACTIVE_LOW, Config::ALT_MAX_SPEED, Config::ALT_ACCEL, Config::START_SPEED,
+                     Config::STEP_PULSE_US, Config::MOTION_TIMEOUT_MS);
 StepDirAxis azimuth("AZ", Config::AZ_STEP_PIN, Config::AZ_DIR_PIN, Config::AZ_EN_PIN, Config::AZ_DIR_INVERT,
-                    Config::AZ_MAX_SPEED, Config::AZ_ACCEL);
+                    Config::ENABLE_ACTIVE_LOW, Config::AZ_MAX_SPEED, Config::AZ_ACCEL, Config::START_SPEED,
+                    Config::STEP_PULSE_US, Config::MOTION_TIMEOUT_MS);
 
 float altStepsPerArcmin = Config::DEFAULT_ALT_STEPS_PER_ARCMIN;
 float azStepsPerArcmin  = Config::DEFAULT_AZ_STEPS_PER_ARCMIN;
 bool altMaxEnabled = false;
 int32_t altMaxPosition = 0;
+bool azMinEnabled = false;
+bool azMaxEnabled = false;
+int32_t azMaxPosition = 0;
+HoldMode holdMode = Config::DEFAULT_HOLD_MODE;
+uint32_t holdDelayMs = Config::DEFAULT_HOLD_DELAY_MS;
 bool positionDirty = false;
 uint32_t lastPositionChangeMs = 0;
 char lastFault[32] = "NONE";
@@ -255,10 +118,21 @@ void persistPositions(bool force = false)
 
 void persistConfiguration()
 {
+    preferences.putUInt("schema", Config::CONFIG_SCHEMA_VERSION);
     preferences.putFloat("altCal", altStepsPerArcmin);
     preferences.putFloat("azCal", azStepsPerArcmin);
     preferences.putBool("altMaxEn", altMaxEnabled);
     preferences.putLong("altMax", altMaxPosition);
+    preferences.putBool("azMinEn", azMinEnabled);
+    preferences.putBool("azMaxEn", azMaxEnabled);
+    preferences.putLong("azMax", azMaxPosition);
+    preferences.putUChar("holdMode", static_cast<uint8_t>(holdMode));
+    preferences.putUInt("holdDelay", holdDelayMs);
+}
+
+bool limitsReady()
+{
+    return altitude.hasMinimum() && altitude.hasMaximum() && azimuth.hasMinimum() && azimuth.hasMaximum();
 }
 
 void printMotionStatus()
@@ -295,6 +169,11 @@ void reportMoveResult(MoveResult result, bool returnAck)
             if (returnAck)
                 Serial.print('0');
             break;
+        case MoveResult::Range:
+            setFault("COMMAND_RANGE");
+            if (returnAck)
+                Serial.print('0');
+            break;
     }
 }
 
@@ -320,12 +199,89 @@ bool parseLongStrict(const char *text, int32_t &value)
     return true;
 }
 
+bool parseFloatPair(const char *text, float &first, float &second)
+{
+    if (text == nullptr || *text == '\0')
+        return false;
+    char *separator = nullptr;
+    first = strtof(text, &separator);
+    if (separator == text || separator == nullptr || *separator != ',' || !isfinite(first))
+        return false;
+    char *end = nullptr;
+    second = strtof(separator + 1, &end);
+    return end != separator + 1 && *end == '\0' && isfinite(second);
+}
+
+bool arcminutesToSteps(float arcminutes, float calibration, int32_t &steps)
+{
+    const double requested = static_cast<double>(arcminutes) * calibration;
+    if (requested < INT32_MIN || requested > INT32_MAX)
+        return false;
+    steps = static_cast<int32_t>(llround(requested));
+    return true;
+}
+
+bool startAtomicRelativeMove(int32_t azDelta, int32_t altDelta)
+{
+    if (azDelta == 0 && altDelta == 0)
+    {
+        setFault("ZERO_CORRECTION");
+        return false;
+    }
+
+    int32_t azTarget = azimuth.position();
+    int32_t altTarget = altitude.position();
+    const MoveResult azResult = azimuth.calculateRelativeTarget(azDelta, azTarget);
+    const MoveResult altResult = altitude.calculateRelativeTarget(altDelta, altTarget);
+    if (azResult != MoveResult::Accepted)
+    {
+        reportMoveResult(azResult, false);
+        return false;
+    }
+    if (altResult != MoveResult::Accepted)
+    {
+        reportMoveResult(altResult, false);
+        return false;
+    }
+
+    const uint32_t nowUs = micros();
+    const uint32_t nowMs = millis();
+    azimuth.startValidatedMove(azTarget, nowUs, nowMs);
+    altitude.startValidatedMove(altTarget, nowUs, nowMs);
+    setFault("NONE");
+    return true;
+}
+
+bool startAtomicAbsoluteMove(int32_t azTarget, int32_t altTarget)
+{
+    const MoveResult azResult = azimuth.validateTarget(azTarget);
+    const MoveResult altResult = altitude.validateTarget(altTarget);
+    if (azResult != MoveResult::Accepted)
+    {
+        reportMoveResult(azResult, false);
+        return false;
+    }
+    if (altResult != MoveResult::Accepted)
+    {
+        reportMoveResult(altResult, false);
+        return false;
+    }
+
+    const uint32_t nowUs = micros();
+    const uint32_t nowMs = millis();
+    azimuth.startValidatedMove(azTarget, nowUs, nowMs);
+    altitude.startValidatedMove(altTarget, nowUs, nowMs);
+    setFault("NONE");
+    return true;
+}
+
 void handlePaExtension(const char *body)
 {
     if (strcmp(body, "PAB") == 0)  // Mark current ALT position as bottom/zero.
     {
         if (altitude.isMoving())
         {
+            setFault("BUSY");
             Serial.print("0#");
             return;
         }
@@ -343,6 +299,7 @@ void handlePaExtension(const char *body)
         persistConfiguration();
         markPositionDirty();
         persistPositions(true);
+        setFault("NONE");
         Serial.print("1#");
         return;
     }
@@ -350,6 +307,7 @@ void handlePaExtension(const char *body)
     {
         if (altitude.isMoving() || altitude.position() <= altitude.minimum())
         {
+            setFault(altitude.isMoving() ? "BUSY" : "BAD_ALT_LIMIT");
             Serial.print("0#");
             return;
         }
@@ -357,26 +315,198 @@ void handlePaExtension(const char *body)
         altMaxEnabled = true;
         altitude.setLimits(true, 0, true, altMaxPosition);
         persistConfiguration();
+        setFault("NONE");
         Serial.print("1#");
         return;
     }
     if (strcmp(body, "PCT") == 0)  // Clear only the ALT top limit.
     {
+        if (altitude.isMoving())
+        {
+            setFault("BUSY");
+            Serial.print("0#");
+            return;
+        }
         altMaxEnabled = false;
         altitude.setLimits(true, 0, false, 0);
         persistConfiguration();
+        setFault("NONE");
+        Serial.print("1#");
+        return;
+    }
+    if (strcmp(body, "PZB") == 0)  // Mark current AZ position as lower limit/zero.
+    {
+        if (azimuth.isMoving())
+        {
+            setFault("BUSY");
+            Serial.print("0#");
+            return;
+        }
+        const int32_t oldPosition = azimuth.position();
+        azimuth.setCurrentPosition(0);
+        azMinEnabled = true;
+        if (azMaxEnabled)
+        {
+            const int64_t shiftedMaximum = static_cast<int64_t>(azMaxPosition) - oldPosition;
+            if (shiftedMaximum > 0 && shiftedMaximum <= INT32_MAX)
+                azMaxPosition = static_cast<int32_t>(shiftedMaximum);
+            else
+                azMaxEnabled = false;
+        }
+        azimuth.setLimits(true, 0, azMaxEnabled, azMaxPosition);
+        persistConfiguration();
+        markPositionDirty();
+        persistPositions(true);
+        setFault("NONE");
+        Serial.print("1#");
+        return;
+    }
+    if (strcmp(body, "PZT") == 0)  // Mark current AZ position as upper limit.
+    {
+        if (azimuth.isMoving() || !azMinEnabled || azimuth.position() <= azimuth.minimum())
+        {
+            setFault(azimuth.isMoving() ? "BUSY" : "BAD_AZ_LIMIT");
+            Serial.print("0#");
+            return;
+        }
+        azMaxPosition = azimuth.position();
+        azMaxEnabled = true;
+        azimuth.setLimits(true, 0, true, azMaxPosition);
+        persistConfiguration();
+        setFault("NONE");
+        Serial.print("1#");
+        return;
+    }
+    if (strcmp(body, "PZC") == 0)  // Clear both AZ limits for supervised commissioning.
+    {
+        if (azimuth.isMoving())
+        {
+            setFault("BUSY");
+            Serial.print("0#");
+            return;
+        }
+        azMinEnabled = false;
+        azMaxEnabled = false;
+        azimuth.setLimits(false, 0, false, 0);
+        persistConfiguration();
+        setFault("NONE");
         Serial.print("1#");
         return;
     }
     if (strcmp(body, "PGL") == 0)
     {
-        Serial.printf("AZ=%ld,ALT=%ld,ALTMIN=0,ALTMAX=", static_cast<long>(azimuth.position()),
+        const char *state = altitude.isMoving() ? (azimuth.isMoving() ? "BOTH" : "ALT") :
+                            (azimuth.isMoving() ? "AZ" : "IDLE");
+        Serial.printf("AZ=%ld,ALT=%ld,AZMIN=", static_cast<long>(azimuth.position()),
                       static_cast<long>(altitude.position()));
+        if (azMinEnabled)
+            Serial.print('0');
+        else
+            Serial.print("NA");
+        Serial.print(",AZMAX=");
+        if (azMaxEnabled)
+            Serial.print(static_cast<long>(azMaxPosition));
+        else
+            Serial.print("NA");
+        Serial.print(",ALTMIN=0,ALTMAX=");
         if (altMaxEnabled)
             Serial.print(static_cast<long>(altMaxPosition));
         else
             Serial.print("NA");
-        Serial.printf(",ACAL=%.4f,ZCAL=%.4f,FAULT=%s#", altStepsPerArcmin, azStepsPerArcmin, lastFault);
+        Serial.printf(",AZTARGET=%ld,ALTTARGET=%ld,ACAL=%.4f,ZCAL=%.4f,STATE=%s,FAULT=%s,"
+                      "HOLD=%u,HOLDMS=%lu,AZEN=%u,ALTEN=%u,LIMITS=%u,SCHEMA=%lu#",
+                      static_cast<long>(azimuth.targetPosition()), static_cast<long>(altitude.targetPosition()),
+                      altStepsPerArcmin, azStepsPerArcmin, state, lastFault,
+                      static_cast<unsigned>(holdMode), static_cast<unsigned long>(holdDelayMs),
+                      azimuth.driverIsEnabled() ? 1U : 0U, altitude.driverIsEnabled() ? 1U : 0U,
+                      limitsReady() ? 1U : 0U, static_cast<unsigned long>(Config::CONFIG_SCHEMA_VERSION));
+        return;
+    }
+    if (strncmp(body, "PAC", 3) == 0)  // Atomic AZ,ALT correction in degrees.
+    {
+        float azDegrees = 0.0f;
+        float altDegrees = 0.0f;
+        if (!parseFloatPair(body + 3, azDegrees, altDegrees))
+        {
+            setFault("BAD_CORRECTION");
+            Serial.print("0#");
+            return;
+        }
+        if (!limitsReady())
+        {
+            setFault("LIMITS_NOT_READY");
+            Serial.print("0#");
+            return;
+        }
+        const float azArcminutes = azDegrees * 60.0f;
+        const float altArcminutes = altDegrees * 60.0f;
+        if (fabsf(azArcminutes) > Config::MAX_AZ_COMMAND_ARCMIN ||
+            fabsf(altArcminutes) > Config::MAX_ALT_COMMAND_ARCMIN)
+        {
+            setFault("CORRECTION_RANGE");
+            Serial.print("0#");
+            return;
+        }
+        int32_t azSteps = 0;
+        int32_t altSteps = 0;
+        if (!arcminutesToSteps(azArcminutes, azStepsPerArcmin, azSteps) ||
+            !arcminutesToSteps(altArcminutes, altStepsPerArcmin, altSteps))
+        {
+            setFault("CORRECTION_RANGE");
+            Serial.print("0#");
+            return;
+        }
+        Serial.print(startAtomicRelativeMove(azSteps, altSteps) ? "1#" : "0#");
+        return;
+    }
+    if (strncmp(body, "PHM", 3) == 0)
+    {
+        int32_t mode = -1;
+        if (!parseLongStrict(body + 3, mode) || mode < 0 || mode > 2)
+        {
+            setFault("BAD_HOLD_MODE");
+            Serial.print("0#");
+            return;
+        }
+        holdMode = static_cast<HoldMode>(mode);
+        altitude.setHoldPolicy(holdMode, holdDelayMs);
+        azimuth.setHoldPolicy(holdMode, holdDelayMs);
+        persistConfiguration();
+        setFault("NONE");
+        Serial.print("1#");
+        return;
+    }
+    if (strncmp(body, "PHD", 3) == 0)
+    {
+        int32_t delayMs = -1;
+        if (!parseLongStrict(body + 3, delayMs) || delayMs < 0 ||
+            static_cast<uint32_t>(delayMs) > Config::MAX_HOLD_DELAY_MS)
+        {
+            setFault("BAD_HOLD_DELAY");
+            Serial.print("0#");
+            return;
+        }
+        holdDelayMs = static_cast<uint32_t>(delayMs);
+        altitude.setHoldPolicy(holdMode, holdDelayMs);
+        azimuth.setHoldPolicy(holdMode, holdDelayMs);
+        persistConfiguration();
+        setFault("NONE");
+        Serial.print("1#");
+        return;
+    }
+    if (strcmp(body, "PDR") == 0)
+    {
+        const bool released = !altitude.isMoving() && !azimuth.isMoving();
+        if (released)
+        {
+            altitude.releaseDriver();
+            azimuth.releaseDriver();
+        }
+        if (!released)
+            setFault("BUSY");
+        else
+            setFault("NONE");
+        Serial.print(released ? "1#" : "0#");
         return;
     }
     if (strncmp(body, "PCAl", 4) == 0)
@@ -386,10 +516,14 @@ void handlePaExtension(const char *body)
         {
             altStepsPerArcmin = value;
             persistConfiguration();
+            setFault("NONE");
             Serial.print("1#");
         }
         else
+        {
+            setFault("BAD_ALT_CAL");
             Serial.print("0#");
+        }
         return;
     }
     if (strncmp(body, "PCAz", 4) == 0)
@@ -399,10 +533,14 @@ void handlePaExtension(const char *body)
         {
             azStepsPerArcmin = value;
             persistConfiguration();
+            setFault("NONE");
             Serial.print("1#");
         }
         else
+        {
+            setFault("BAD_AZ_CAL");
             Serial.print("0#");
+        }
         return;
     }
     Serial.print("0#");
@@ -416,8 +554,8 @@ void processCommand(const char *command)
 
     // Identification and read-only mount compatibility.
     if (strcmp(body, "GVP") == 0) { Serial.print("B1-AutoAlign#"); return; }
-    if (strcmp(body, "GVN") == 0) { Serial.print("V0.1.0#"); return; }
-    if (strcmp(body, "GVF") == 0) { Serial.print("B1-AutoAlign V0.1.0#"); return; }
+    if (strcmp(body, "GVN") == 0) { Serial.print("V0.2.0#"); return; }
+    if (strcmp(body, "GVF") == 0) { Serial.print("B1-AutoAlign V0.2.0#"); return; }
     if (strcmp(body, "GVD") == 0) { Serial.print("Nov 2026#"); return; }
     if (strcmp(body, "GVT") == 0) { Serial.print("00:00:00#"); return; }
     if (strcmp(body, "GR") == 0)  { Serial.print("00:00:00#"); return; }
@@ -459,28 +597,46 @@ void processCommand(const char *command)
     {
         float arcmin;
         if (!parseFloatStrict(body + 3, arcmin)) { setFault("BAD_ALT_CMD"); return; }
-        const double requestedSteps = static_cast<double>(arcmin) * altStepsPerArcmin;
-        if (requestedSteps < INT32_MIN || requestedSteps > INT32_MAX)
+        if (arcmin == 0.0f || fabsf(arcmin) > Config::MAX_ALT_COMMAND_ARCMIN)
         {
-            setFault("ALT_RANGE");
+            setFault("COMMAND_RANGE");
             return;
         }
-        const int32_t delta = static_cast<int32_t>(llround(requestedSteps));
-        reportMoveResult(altitude.moveBy(delta), false);
+        int32_t delta = 0;
+        if (!arcminutesToSteps(arcmin, altStepsPerArcmin, delta))
+        {
+            setFault("COMMAND_RANGE");
+            return;
+        }
+        if (delta == 0)
+        {
+            setFault("ZERO_CORRECTION");
+            return;
+        }
+        reportMoveResult(altitude.moveBy(delta, micros(), millis()), false);
         return;
     }
     if (strncmp(body, "MAZ", 3) == 0)
     {
         float arcmin;
         if (!parseFloatStrict(body + 3, arcmin)) { setFault("BAD_AZ_CMD"); return; }
-        const double requestedSteps = static_cast<double>(arcmin) * azStepsPerArcmin;
-        if (requestedSteps < INT32_MIN || requestedSteps > INT32_MAX)
+        if (arcmin == 0.0f || fabsf(arcmin) > Config::MAX_AZ_COMMAND_ARCMIN)
         {
-            setFault("AZ_RANGE");
+            setFault("COMMAND_RANGE");
             return;
         }
-        const int32_t delta = static_cast<int32_t>(llround(requestedSteps));
-        reportMoveResult(azimuth.moveBy(delta), false);
+        int32_t delta = 0;
+        if (!arcminutesToSteps(arcmin, azStepsPerArcmin, delta))
+        {
+            setFault("COMMAND_RANGE");
+            return;
+        }
+        if (delta == 0)
+        {
+            setFault("ZERO_CORRECTION");
+            return;
+        }
+        reportMoveResult(azimuth.moveBy(delta, micros(), millis()), false);
         return;
     }
     if (strncmp(body, "MXl", 3) == 0)
@@ -492,7 +648,13 @@ void processCommand(const char *command)
             Serial.print('0');
             return;
         }
-        reportMoveResult(altitude.moveBy(steps), true);
+        if (steps == 0 || llabs(static_cast<long long>(steps)) > Config::MAX_RAW_JOG_STEPS)
+        {
+            setFault("COMMAND_RANGE");
+            Serial.print('0');
+            return;
+        }
+        reportMoveResult(altitude.moveBy(steps, micros(), millis()), true);
         return;
     }
     if (strncmp(body, "MXz", 3) == 0)
@@ -504,7 +666,13 @@ void processCommand(const char *command)
             Serial.print('0');
             return;
         }
-        reportMoveResult(azimuth.moveBy(steps), true);
+        if (steps == 0 || llabs(static_cast<long long>(steps)) > Config::MAX_RAW_JOG_STEPS)
+        {
+            setFault("COMMAND_RANGE");
+            Serial.print('0');
+            return;
+        }
+        reportMoveResult(azimuth.moveBy(steps, micros(), millis()), true);
         return;
     }
 
@@ -516,22 +684,24 @@ void processCommand(const char *command)
         azimuth.setCurrentPosition(0);
         markPositionDirty();
         persistPositions(true);
+        setFault("NONE");
         Serial.print('1');
         return;
     }
     if (strcmp(body, "MAA") == 0 || strcmp(body, "MAAH") == 0)
     {
-        const MoveResult azResult = azimuth.moveTo(0);
-        const MoveResult altResult = altitude.moveTo(0);
-        Serial.print((azResult == MoveResult::Accepted && altResult == MoveResult::Accepted) ? '1' : '0');
+        Serial.print(startAtomicAbsoluteMove(0, 0) ? '1' : '0');
         return;
     }
     if (strcmp(body, "Q") == 0)
     {
-        azimuth.stopNow();
-        altitude.stopNow();
+        const bool wasMoving = azimuth.isMoving() || altitude.isMoving();
+        const uint32_t nowMs = millis();
+        azimuth.stopNow(nowMs);
+        altitude.stopNow(nowMs);
         markPositionDirty();
         persistPositions(true);
+        setFault(wasMoving ? "STOPPED" : "NONE");
         return;
     }
 
@@ -591,27 +761,114 @@ void setup()
     Serial.begin(Config::SERIAL_BAUD);
 
     preferences.begin("b1autoalign", false);
+    const uint32_t storedSchema = preferences.getUInt("schema", 0);
+    bool configurationRepaired = false;
+
     altStepsPerArcmin = preferences.getFloat("altCal", Config::DEFAULT_ALT_STEPS_PER_ARCMIN);
     azStepsPerArcmin = preferences.getFloat("azCal", Config::DEFAULT_AZ_STEPS_PER_ARCMIN);
+    if (!isfinite(altStepsPerArcmin) || altStepsPerArcmin <= 0.0f || altStepsPerArcmin >= 100000.0f)
+    {
+        altStepsPerArcmin = Config::DEFAULT_ALT_STEPS_PER_ARCMIN;
+        configurationRepaired = true;
+    }
+    if (!isfinite(azStepsPerArcmin) || azStepsPerArcmin <= 0.0f || azStepsPerArcmin >= 100000.0f)
+    {
+        azStepsPerArcmin = Config::DEFAULT_AZ_STEPS_PER_ARCMIN;
+        configurationRepaired = true;
+    }
+
     altMaxEnabled = preferences.getBool("altMaxEn", false);
     altMaxPosition = preferences.getLong("altMax", 0);
+    if (altMaxEnabled && altMaxPosition <= Config::DEFAULT_ALT_MIN)
+    {
+        altMaxEnabled = false;
+        altMaxPosition = 0;
+        configurationRepaired = true;
+    }
+    azMinEnabled = preferences.getBool("azMinEn", false);
+    azMaxEnabled = preferences.getBool("azMaxEn", false);
+    azMaxPosition = preferences.getLong("azMax", 0);
+    if (azMaxEnabled && (!azMinEnabled || azMaxPosition <= 0))
+    {
+        azMaxEnabled = false;
+        azMaxPosition = 0;
+        configurationRepaired = true;
+    }
 
-    const int32_t savedAlt = preferences.getLong("altPos", Config::DEFAULT_ALT_MIN);
-    const int32_t savedAz = preferences.getLong("azPos", 0);
+    const uint8_t storedHoldMode = preferences.getUChar("holdMode", static_cast<uint8_t>(Config::DEFAULT_HOLD_MODE));
+    if (storedHoldMode <= static_cast<uint8_t>(HoldMode::Always))
+        holdMode = static_cast<HoldMode>(storedHoldMode);
+    else
+    {
+        holdMode = Config::DEFAULT_HOLD_MODE;
+        configurationRepaired = true;
+    }
+    holdDelayMs = preferences.getUInt("holdDelay", Config::DEFAULT_HOLD_DELAY_MS);
+    if (holdDelayMs > Config::MAX_HOLD_DELAY_MS)
+    {
+        holdDelayMs = Config::DEFAULT_HOLD_DELAY_MS;
+        configurationRepaired = true;
+    }
+
+    int32_t savedAlt = preferences.getLong("altPos", Config::DEFAULT_ALT_MIN);
+    int32_t savedAz = preferences.getLong("azPos", 0);
+    if (savedAlt < Config::DEFAULT_ALT_MIN)
+    {
+        savedAlt = Config::DEFAULT_ALT_MIN;
+        configurationRepaired = true;
+    }
+    if (altMaxEnabled && savedAlt > altMaxPosition)
+    {
+        altMaxEnabled = false;
+        altMaxPosition = 0;
+        configurationRepaired = true;
+    }
+    if ((azMinEnabled && savedAz < 0) || (azMaxEnabled && savedAz > azMaxPosition))
+    {
+        azMinEnabled = false;
+        azMaxEnabled = false;
+        azMaxPosition = 0;
+        configurationRepaired = true;
+    }
+
     altitude.begin(savedAlt);
     azimuth.begin(savedAz);
     altitude.setLimits(true, Config::DEFAULT_ALT_MIN, altMaxEnabled, altMaxPosition);
-    azimuth.setLimits(false, 0, false, 0);
+    azimuth.setLimits(azMinEnabled, 0, azMaxEnabled, azMaxPosition);
+    altitude.setHoldPolicy(holdMode, holdDelayMs);
+    azimuth.setHoldPolicy(holdMode, holdDelayMs);
+
+    if (storedSchema != Config::CONFIG_SCHEMA_VERSION || configurationRepaired)
+    {
+        persistConfiguration();
+        if (configurationRepaired)
+        {
+            markPositionDirty();
+            persistPositions(true);
+            setFault("CONFIG_REPAIRED");
+        }
+        else
+            setFault("CONFIG_MIGRATED");
+    }
 }
 
 void loop()
 {
     serviceSerial();
-    const uint32_t now = micros();
-    const bool altStepped = altitude.service(now);
-    const bool azStepped = azimuth.service(now);
-    if (altStepped || azStepped)
+    const uint32_t nowUs = micros();
+    const uint32_t nowMs = millis();
+    const ServiceResult altResult = altitude.service(nowUs, nowMs);
+    const ServiceResult azResult = azimuth.service(nowUs, nowMs);
+    if (altResult == ServiceResult::Stepped || altResult == ServiceResult::Completed ||
+        altResult == ServiceResult::TimedOut || azResult == ServiceResult::Stepped ||
+        azResult == ServiceResult::Completed || azResult == ServiceResult::TimedOut)
         markPositionDirty();
+    if (altResult == ServiceResult::TimedOut || azResult == ServiceResult::TimedOut)
+    {
+        altitude.stopNow(nowMs);
+        azimuth.stopNow(nowMs);
+        setFault(altResult == ServiceResult::TimedOut ? "ALT_TIMEOUT" : "AZ_TIMEOUT");
+    }
     persistPositions(false);
     delay(0);
 }

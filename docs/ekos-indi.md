@@ -54,3 +54,11 @@ PAC_ABORT_MOTION.ABORT
 ```
 
 The upstream sign convention is positive AZ = east, negative AZ = west, positive ALT = north/up and negative ALT = south/down. Current upstream KStars can use this interface from its Polar Alignment Assistant. The installed INDI 1.9.9/KStars 3.6.2 stack predates that capability, so B1-AutoAlign only detects and reports a future PAC device for now. It does not emulate support that the installed stack does not have.
+
+Firmware v0.2.0 provides a bounded, atomic serial correction primitive in the same axis order and units:
+
+```text
+:PAC<azimuth-degrees>,<altitude-degrees>#
+```
+
+It accepts the move only when both axes are idle, all ALT/AZ soft limits are recorded, both target positions are legal and the requested magnitude is inside the firmware envelope. The reply is `1#` when both targets were committed or `0#` when neither was started. A future INDI PAC driver can map `PAC_MANUAL_ADJUSTMENT` to this command without issuing two non-atomic moves.

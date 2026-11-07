@@ -10,6 +10,8 @@
 - Protocol tests cover status parsing, B1 motion commands, rejected limits and strict legacy-firmware read-only behavior.
 - The PyQt6 desktop window passes an offscreen create/show/close smoke test.
 - Automation tests cover Ekos D-Bus capability parsing, solve-only capture setup, standard INDI camera/PAC discovery, WCS parsing, bounded local-solver invocation and backend fallback selection.
+- An executable C++ host test exercises real `MotionAxis.h` limit checks, 32-bit overflow rejection, release/timed/continuous holding, STOP behavior and timeout handling across `millis()` wrap.
+- Protocol tests cover v0.2 AZ-limit, holding and atomic-correction commands plus expanded status parsing.
 - The release archive from the precursor prototype passed ZIP integrity checking.
 
 ## Derived from the connected system
@@ -35,5 +37,6 @@
 - Three-frame polar-error calculation and any automatic motor correction.
 - Desktop-app communication with flashed B1-AutoAlign hardware.
 - Operation with the complete 25 kg telescope assembly.
+- Physical end switches or encoders; v0.2 limits remain open-loop.
 
 The existing controller firmware has not been replaced during repository creation.

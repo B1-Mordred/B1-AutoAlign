@@ -112,6 +112,24 @@ class SerialWorker(QObject):
             elif kind == "clear_top":
                 self.client.clear_alt_top()
                 message = "ALT upper limit cleared"
+            elif kind == "mark_az_bottom":
+                self.client.mark_az_bottom()
+                message = "Current AZ position marked as lower limit/zero"
+            elif kind == "mark_az_top":
+                self.client.mark_az_top()
+                message = "Current AZ position stored as upper limit"
+            elif kind == "clear_az_limits":
+                self.client.clear_az_limits()
+                message = "Both AZ limits cleared"
+            elif kind == "hold_mode":
+                self.client.set_hold_mode(payload["mode"])
+                message = f"Motor hold mode stored: {payload['mode']}"
+            elif kind == "hold_delay":
+                self.client.set_hold_delay(payload["milliseconds"])
+                message = f"Timed hold delay stored: {payload['milliseconds']} ms"
+            elif kind == "release_drivers":
+                self.client.release_drivers()
+                message = "Both idle motor drivers released"
             elif kind == "calibration":
                 self.client.set_calibration(payload["axis"], payload["value"])
                 message = f"{payload['axis']} calibration stored: {payload['value']:.4f} steps/arcmin"
@@ -300,6 +318,9 @@ class MainWindow(QMainWindow):
             ("ALT position", "alt_position"),
             ("AZ position", "az_position"),
             ("ALT limits", "alt_limits"),
+            ("AZ limits", "az_limits"),
+            ("Motor holding", "holding"),
+            ("Auto limits", "auto_limits"),
             ("ALT calibration", "alt_cal"),
             ("AZ calibration", "az_cal"),
         ]
@@ -384,7 +405,13 @@ class MainWindow(QMainWindow):
         tabs.addTab(motion_tab, "Motion")
 
         setup_tab = QWidget()
-        setup_root = QVBoxLayout(setup_tab)
+        setup_tab_root = QVBoxLayout(setup_tab)
+        setup_tab_root.setContentsMargins(0, 0, 0, 0)
+        setup_scroll = QScrollArea()
+        setup_scroll.setWidgetResizable(True)
+        setup_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        setup_content = QWidget()
+        setup_root = QVBoxLayout(setup_content)
         setup_root.setContentsMargins(4, 8, 4, 4)
         management = QGroupBox("Reference and limits")
         management_layout = QGridLayout(management)
@@ -402,6 +429,20 @@ class MainWindow(QMainWindow):
         management_layout.addWidget(clear_button, 1, 1)
         self.control_widgets.extend([zero_button, bottom_button, top_button, clear_button])
         setup_root.addWidget(management)
+
+        az_management = QGroupBox("AZ reference and limits")
+        az_management_layout = QGridLayout(az_management)
+        az_bottom_button = QPushButton("Mark current AZ as lower/zero")
+        az_top_button = QPushButton("Mark current AZ as upper")
+        az_clear_button = QPushButton("Clear both AZ limits")
+        az_bottom_button.clicked.connect(self._mark_az_bottom)
+        az_top_button.clicked.connect(self._mark_az_top)
+        az_clear_button.clicked.connect(self._clear_az_limits)
+        az_management_layout.addWidget(az_bottom_button, 0, 0)
+        az_management_layout.addWidget(az_top_button, 0, 1)
+        az_management_layout.addWidget(az_clear_button, 1, 0, 1, 2)
+        self.control_widgets.extend([az_bottom_button, az_top_button, az_clear_button])
+        setup_root.addWidget(az_management)
 
         calibration = QGroupBox("Steps per arcminute")
         form = QFormLayout(calibration)
@@ -427,7 +468,43 @@ class MainWindow(QMainWindow):
         form.addRow("AZ", az_row)
         self.control_widgets.extend([self.alt_cal_input, alt_set, self.az_cal_input, az_set])
         setup_root.addWidget(calibration)
+
+        holding = QGroupBox("Motor holding — validate thermals under load")
+        holding_form = QFormLayout(holding)
+        hold_row = QHBoxLayout()
+        self.hold_mode_combo = QComboBox()
+        self.hold_mode_combo.addItem("Release after motion", 0)
+        self.hold_mode_combo.addItem("Timed hold", 1)
+        self.hold_mode_combo.addItem("Always hold (v0.2 default)", 2)
+        hold_set = QPushButton("Store mode")
+        hold_set.clicked.connect(
+            lambda: self._send_action({"kind": "hold_mode", "mode": self.hold_mode_combo.currentData()})
+        )
+        hold_row.addWidget(self.hold_mode_combo, 1)
+        hold_row.addWidget(hold_set)
+        holding_form.addRow("Mode", hold_row)
+        delay_row = QHBoxLayout()
+        self.hold_delay_input = QSpinBox()
+        self.hold_delay_input.setRange(0, 600_000)
+        self.hold_delay_input.setValue(5000)
+        self.hold_delay_input.setSuffix(" ms")
+        delay_set = QPushButton("Store delay")
+        delay_set.clicked.connect(
+            lambda: self._send_action({"kind": "hold_delay", "milliseconds": self.hold_delay_input.value()})
+        )
+        release_button = QPushButton("Release idle drivers now")
+        release_button.clicked.connect(self._release_drivers)
+        delay_row.addWidget(self.hold_delay_input, 1)
+        delay_row.addWidget(delay_set)
+        delay_row.addWidget(release_button)
+        holding_form.addRow("Timed delay", delay_row)
+        self.control_widgets.extend(
+            [self.hold_mode_combo, hold_set, self.hold_delay_input, delay_set, release_button]
+        )
+        setup_root.addWidget(holding)
         setup_root.addStretch()
+        setup_scroll.setWidget(setup_content)
+        setup_tab_root.addWidget(setup_scroll)
         tabs.addTab(setup_tab, "Reference & calibration")
 
         automation_tab = QWidget()
@@ -701,6 +778,34 @@ class MainWindow(QMainWindow):
         else:
             maximum = "not set" if data["alt_max"] is None else f"{data['alt_max']:,}"
             self.status_values["alt_limits"].setText(f"{data['alt_min']:,} … {maximum} steps")
+        if data["az_min"] is None:
+            self.status_values["az_limits"].setText("not set / unavailable")
+        else:
+            maximum = "not set" if data["az_max"] is None else f"{data['az_max']:,}"
+            self.status_values["az_limits"].setText(f"{data['az_min']:,} … {maximum} steps")
+        if data["hold_mode"] is None:
+            self.status_values["holding"].setText("unavailable")
+        else:
+            hold_names = {0: "release", 1: "timed", 2: "always"}
+            drivers = (
+                f"drivers AZ {'on' if data['az_driver_enabled'] else 'off'}, "
+                f"ALT {'on' if data['alt_driver_enabled'] else 'off'}"
+            )
+            self.status_values["holding"].setText(
+                f"{hold_names.get(data['hold_mode'], 'unknown')} ({data['hold_delay_ms']} ms); {drivers}"
+            )
+            if not self.hold_mode_combo.hasFocus():
+                index = self.hold_mode_combo.findData(data["hold_mode"])
+                if index >= 0:
+                    self.hold_mode_combo.setCurrentIndex(index)
+            if not self.hold_delay_input.hasFocus():
+                self.hold_delay_input.setValue(data["hold_delay_ms"])
+        if data["limits_ready"] is None:
+            self.status_values["auto_limits"].setText("unavailable")
+        else:
+            self.status_values["auto_limits"].setText(
+                "READY" if data["limits_ready"] else "LOCKED — record ALT and AZ ranges"
+            )
         if data["alt_calibration"] is None:
             self.status_values["alt_cal"].setText("—")
             self.status_values["az_cal"].setText("—")
@@ -788,6 +893,37 @@ class MainWindow(QMainWindow):
             "This removes upper soft-limit protection until a new top is recorded.",
         ):
             self._send_action({"kind": "clear_top"})
+
+    def _mark_az_bottom(self) -> None:
+        if self._confirm(
+            "Set AZ lower limit?",
+            "Confirm that the AZ mechanism is at its physical lower safe travel limit. "
+            "The current AZ coordinate becomes zero.",
+        ):
+            self._send_action({"kind": "mark_az_bottom"})
+
+    def _mark_az_top(self) -> None:
+        if self._confirm(
+            "Set AZ upper limit?",
+            "The current positive AZ position will become the upper soft limit. "
+            "Record the lower AZ limit first.",
+        ):
+            self._send_action({"kind": "mark_az_top"})
+
+    def _clear_az_limits(self) -> None:
+        if self._confirm(
+            "Clear both AZ limits?",
+            "This disables automatic-correction readiness until both AZ limits are recorded again.",
+        ):
+            self._send_action({"kind": "clear_az_limits"})
+
+    def _release_drivers(self) -> None:
+        if self._confirm(
+            "Release motor holding?",
+            "Both drivers will be de-energized. Confirm that the 25 kg load is mechanically supported "
+            "and cannot back-drive either axis.",
+        ):
+            self._send_action({"kind": "release_drivers"})
 
     def _set_calibration(self, axis: str, value: float) -> None:
         self._send_action({"kind": "calibration", "axis": axis, "value": value})

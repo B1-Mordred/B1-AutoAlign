@@ -15,10 +15,12 @@ The firmware identifies itself as `B1-AutoAlign` over the LX200-compatible seria
 - ESP32 control of two STEP/DIR/ENABLE stepper axes
 - OpenAstroExplorer v1 pin assignment
 - acceleration and conservative default step rates
-- persistent positions, calibration and upper ALT limit in ESP32 NVS
-- persistent ALT lower soft limit at zero
-- optional ALT upper soft limit
-- safe, non-crashing `:Q#` stop command
+- persistent positions, calibration, ALT/AZ limits and holding policy in ESP32 NVS
+- bilateral soft-limit support with an automatic-correction readiness interlock
+- atomic two-axis correction command with bounded magnitude
+- 180-second motion timeout and safe, non-crashing `:Q#` stop command
+- configurable release, timed-hold and always-hold motor policies
+- boot-time configuration validation and schema migration
 - LX200 handshake and fixed compatibility replies for Ekos/INDI
 - PA-specific status, limit and calibration commands
 - no automatic movement at startup
@@ -37,7 +39,7 @@ docs/                    build, hardware, protocol, safety and validation notes
 packaging/               desktop launcher templates
 scripts/                 build, check, flash and flash-backup helpers
 tools/                   serial diagnostic client
-tests/                   repository and firmware-contract tests
+tests/                   repository, protocol and executable motion-policy tests
 integrations/indi-1.9.9/ legacy INDI OpenAstroTech PA-control patch
 .github/workflows/       continuous-integration build
 ```
@@ -64,6 +66,7 @@ Before any future upload, read [Safety](docs/safety.md), make a flash backup, su
 
 ## Documentation
 
+- [Changelog](CHANGELOG.md)
 - [Build and installation](docs/build.md)
 - [Hardware mapping](docs/hardware.md)
 - [Serial protocol](docs/protocol.md)

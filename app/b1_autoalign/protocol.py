@@ -33,6 +33,8 @@ class Identity:
 class Snapshot:
     az_steps: int
     alt_steps: int
+    az_min: Optional[int]
+    az_max: Optional[int]
     alt_min: Optional[int]
     alt_max: Optional[int]
     alt_calibration: Optional[float]
@@ -40,6 +42,15 @@ class Snapshot:
     fault: str
     moving_az: bool
     moving_alt: bool
+    state: str
+    az_target: Optional[int]
+    alt_target: Optional[int]
+    hold_mode: Optional[int]
+    hold_delay_ms: Optional[int]
+    az_driver_enabled: Optional[bool]
+    alt_driver_enabled: Optional[bool]
+    limits_ready: Optional[bool]
+    schema: Optional[int]
 
 
 def parse_pgl(response: str) -> dict[str, str]:
@@ -177,27 +188,51 @@ class B1AutoAlignClient:
         if identity.full_control:
             fields = parse_pgl(self._query_hash(":PGL#"))
             alt_max = None if fields["ALTMAX"] == "NA" else int(fields["ALTMAX"])
+            az_min = None if fields.get("AZMIN", "NA") == "NA" else int(fields["AZMIN"])
+            az_max = None if fields.get("AZMAX", "NA") == "NA" else int(fields["AZMAX"])
             az_steps = int(fields["AZ"])
             alt_steps = int(fields["ALT"])
             alt_min = int(fields["ALTMIN"])
             alt_cal = float(fields["ACAL"])
             az_cal = float(fields["ZCAL"])
             fault = fields["FAULT"]
+            state = fields.get("STATE", "UNKNOWN")
+            az_target = int(fields["AZTARGET"]) if "AZTARGET" in fields else None
+            alt_target = int(fields["ALTTARGET"]) if "ALTTARGET" in fields else None
+            hold_mode = int(fields["HOLD"]) if "HOLD" in fields else None
+            hold_delay_ms = int(fields["HOLDMS"]) if "HOLDMS" in fields else None
+            az_driver_enabled = fields.get("AZEN") == "1" if "AZEN" in fields else None
+            alt_driver_enabled = fields.get("ALTEN") == "1" if "ALTEN" in fields else None
+            limits_ready = fields.get("LIMITS") == "1" if "LIMITS" in fields else None
+            schema = int(fields["SCHEMA"]) if "SCHEMA" in fields else None
         else:
             positions = self._query_hash(":XGAA#").split("|")
             if len(positions) != 2:
                 raise ProtocolError("Malformed XGAA position response")
             az_steps, alt_steps = map(int, positions)
+            az_min = None
+            az_max = None
             alt_min = None
             alt_max = None
             alt_cal = None
             az_cal = None
             fault = "LEGACY_READ_ONLY"
+            state = "LEGACY"
+            az_target = None
+            alt_target = None
+            hold_mode = None
+            hold_delay_ms = None
+            az_driver_enabled = None
+            alt_driver_enabled = None
+            limits_ready = None
+            schema = None
 
         moving_az, moving_alt = parse_motion(self._query_hash(":GX#"))
         return Snapshot(
             az_steps=az_steps,
             alt_steps=alt_steps,
+            az_min=az_min,
+            az_max=az_max,
             alt_min=alt_min,
             alt_max=alt_max,
             alt_calibration=alt_cal,
@@ -205,6 +240,15 @@ class B1AutoAlignClient:
             fault=fault,
             moving_az=moving_az,
             moving_alt=moving_alt,
+            state=state,
+            az_target=az_target,
+            alt_target=alt_target,
+            hold_mode=hold_mode,
+            hold_delay_ms=hold_delay_ms,
+            az_driver_enabled=az_driver_enabled,
+            alt_driver_enabled=alt_driver_enabled,
+            limits_ready=limits_ready,
+            schema=schema,
         )
 
     def move_arcminutes(self, axis: str, amount: float) -> None:
@@ -252,6 +296,51 @@ class B1AutoAlignClient:
         self._require_full_control()
         if self._query_hash(":PCT#") != "1":
             raise ProtocolError("Clearing the ALT top limit was rejected")
+
+    def mark_az_bottom(self) -> None:
+        self._require_full_control()
+        if self._query_hash(":PZB#") != "1":
+            raise ProtocolError("AZ lower-limit command was rejected")
+
+    def mark_az_top(self) -> None:
+        self._require_full_control()
+        if self._query_hash(":PZT#") != "1":
+            raise ProtocolError("AZ upper-limit command was rejected")
+
+    def clear_az_limits(self) -> None:
+        self._require_full_control()
+        if self._query_hash(":PZC#") != "1":
+            raise ProtocolError("Clearing the AZ limits was rejected")
+
+    def set_hold_mode(self, mode: int) -> None:
+        self._require_full_control()
+        if mode not in (0, 1, 2):
+            raise ValueError("Hold mode must be 0 (release), 1 (timed), or 2 (always)")
+        if self._query_hash(f":PHM{mode}#") != "1":
+            raise ProtocolError("Hold-mode command was rejected")
+
+    def set_hold_delay(self, milliseconds: int) -> None:
+        self._require_full_control()
+        if not 0 <= milliseconds <= 600_000:
+            raise ValueError("Hold delay must be between 0 and 600000 milliseconds")
+        if self._query_hash(f":PHD{milliseconds}#") != "1":
+            raise ProtocolError("Hold-delay command was rejected")
+
+    def release_drivers(self) -> None:
+        self._require_full_control()
+        if self._query_hash(":PDR#") != "1":
+            raise ProtocolError("Drivers cannot be released while an axis is moving")
+
+    def move_correction_degrees(self, az_degrees: float, alt_degrees: float) -> None:
+        self._require_full_control()
+        if not math.isfinite(az_degrees) or not math.isfinite(alt_degrees):
+            raise ValueError("Correction values must be finite")
+        if az_degrees == 0 and alt_degrees == 0:
+            raise ValueError("At least one correction axis must be non-zero")
+        if abs(az_degrees) > 320.0 / 60.0 or abs(alt_degrees) > 140.0 / 60.0:
+            raise ValueError("Correction exceeds the firmware safety envelope")
+        if self._query_hash(f":PAC{az_degrees:.6f},{alt_degrees:.6f}#") != "1":
+            raise ProtocolError("Atomic correction was rejected; inspect limits and fault status")
 
     def set_calibration(self, axis: str, steps_per_arcminute: float) -> None:
         self._require_full_control()

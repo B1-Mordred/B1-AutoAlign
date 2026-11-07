@@ -15,7 +15,7 @@ class FirmwareContractTests(unittest.TestCase):
 
     def test_product_identity(self):
         self.assertIn('Serial.print("B1-AutoAlign#")', self.source)
-        self.assertIn('Serial.print("B1-AutoAlign V0.1.0#")', self.source)
+        self.assertIn('Serial.print("B1-AutoAlign V0.2.0#")', self.source)
 
     def test_oae_v1_pin_contract(self):
         expected = {
@@ -36,8 +36,20 @@ class FirmwareContractTests(unittest.TestCase):
     def test_altitude_lower_limit_and_safe_stop(self):
         self.assertRegex(self.source, r"DEFAULT_ALT_MIN\s*=\s*0;")
         self.assertIn('strcmp(body, "Q") == 0', self.source)
-        self.assertIn("altitude.stopNow();", self.source)
-        self.assertIn("azimuth.stopNow();", self.source)
+        self.assertIn("altitude.stopNow(nowMs);", self.source)
+        self.assertIn("azimuth.stopNow(nowMs);", self.source)
+
+    def test_v02_motion_safety_contract(self):
+        header = (SOURCE.parent / "MotionAxis.h").read_text(encoding="utf-8")
+        self.assertIn('strcmp(body, "PZB") == 0', self.source)
+        self.assertIn('strcmp(body, "PZT") == 0', self.source)
+        self.assertIn('strncmp(body, "PAC", 3) == 0', self.source)
+        self.assertIn("startAtomicRelativeMove", self.source)
+        self.assertIn("MAX_ALT_COMMAND_ARCMIN", self.source)
+        self.assertIn("MAX_AZ_COMMAND_ARCMIN", self.source)
+        self.assertIn("CONFIG_SCHEMA_VERSION = 2", self.source)
+        self.assertIn("ServiceResult::TimedOut", header)
+        self.assertIn("HoldMode::Always", header)
 
     def test_project_namespace(self):
         self.assertIn('preferences.begin("b1autoalign", false)', self.source)
