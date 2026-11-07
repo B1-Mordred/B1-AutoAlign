@@ -1,3 +1,2 @@
-fatal: ambiguous argument ':"packaging/b1-autoalign-launcher.in"': unknown revision or path not in the working tree.
-Use '--' to separate paths from revisions, like this:
-'git <command> [<revision>...] -- [<file>...]'
+#!/usr/bin/env bash
+exec "@REPO_DIR@/scripts/run-app.sh" "$@"

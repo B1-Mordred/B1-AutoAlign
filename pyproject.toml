@@ -1,3 +1,25 @@
-fatal: ambiguous argument ':"pyproject.toml"': unknown revision or path not in the working tree.
-Use '--' to separate paths from revisions, like this:
-'git <command> [<revision>...] -- [<file>...]'
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "b1-autoalign"
+version = "0.1.0"
+description = "Desktop control and management application for the B1-AutoAlign polar-alignment base"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "B1-AutoAlign contributors" }]
+dependencies = [
+    "pyserial>=3.5,<4",
+    "PyQt6>=6.5,<7",
+]
+
+[project.scripts]
+b1-autoalign = "b1_autoalign.__main__:main"
+
+[tool.setuptools]
+package-dir = { "" = "app" }
+
+[tool.setuptools.packages.find]
+where = ["app"]

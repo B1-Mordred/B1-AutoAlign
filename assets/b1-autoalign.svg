@@ -1,3 +1,20 @@
-fatal: ambiguous argument ':"assets/b1-autoalign.svg"': unknown revision or path not in the working tree.
-Use '--' to separate paths from revisions, like this:
-'git <command> [<revision>...] -- [<file>...]'
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1c2330"/>
+      <stop offset="1" stop-color="#10141b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#4b7bec"/>
+      <stop offset="1" stop-color="#77e5b5"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#bg)"/>
+  <circle cx="128" cy="116" r="72" fill="none" stroke="#39445a" stroke-width="10"/>
+  <path d="M66 151 A72 72 0 0 1 188 78" fill="none" stroke="url(#accent)" stroke-width="14" stroke-linecap="round"/>
+  <path d="M181 61 L203 79 L176 88" fill="url(#accent)"/>
+  <path d="M91 163 L158 86" stroke="#f0f4ff" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="93" cy="161" r="18" fill="#f0f4ff"/>
+  <path d="M85 188 H171 L196 220 H60 Z" fill="#2d3749" stroke="#71809b" stroke-width="5" stroke-linejoin="round"/>
+  <circle cx="128" cy="116" r="8" fill="#77e5b5"/>
+</svg>

@@ -1,3 +1,12 @@
-fatal: ambiguous argument ':"packaging/b1-autoalign.desktop.in"': unknown revision or path not in the working tree.
-Use '--' to separate paths from revisions, like this:
-'git <command> [<revision>...] -- [<file>...]'
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=B1-AutoAlign
+GenericName=Polar Alignment Controller
+Comment=Control and manage the B1-AutoAlign motorized polar-alignment base
+Exec=@USER_BIN@/b1-autoalign
+Icon=b1-autoalign
+Terminal=false
+Categories=Science;Astronomy;
+Keywords=telescope;astronomy;polar;alignment;ESP32;
+StartupNotify=true
