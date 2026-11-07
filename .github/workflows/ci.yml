@@ -23,7 +23,10 @@ jobs:
           arduino-cli core install esp32:esp32@3.3.12 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 
       - name: Install desktop-app dependencies
-        run: python3 -m pip install --requirement requirements.txt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libegl1 libgl1 libxkbcommon-x11-0
+          python3 -m pip install --requirement requirements.txt
 
       - name: Run checks and compile
         run: ./scripts/check.sh
