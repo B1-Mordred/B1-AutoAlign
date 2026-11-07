@@ -11,6 +11,7 @@ from PyQt6.QtCore import QMetaObject, QObject, QSettings, QThread, QTimer, Qt, p
 from PyQt6.QtGui import QCloseEvent, QFont
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -19,10 +20,12 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QTabWidget,
@@ -31,6 +34,7 @@ from PyQt6.QtWidgets import (
 )
 from serial.tools import list_ports
 
+from .automation import AutomationManager
 from .protocol import B1AutoAlignClient
 
 
@@ -119,11 +123,48 @@ class SerialWorker(QObject):
             self.error.emit("action", str(exc))
 
 
+class AutomationWorker(QObject):
+    report_ready = pyqtSignal(object)
+    solution_ready = pyqtSignal(object)
+    error = pyqtSignal(str, str)
+
+    @pyqtSlot(object)
+    def refresh(self, request: object) -> None:
+        config = dict(request)
+        try:
+            manager = AutomationManager(config["host"], config["port"])
+            self.report_ready.emit(asdict(manager.detect(config["backend"])))
+        except Exception as exc:
+            self.error.emit("automation refresh", str(exc))
+
+    @pyqtSlot(object)
+    def capture_and_solve(self, request: object) -> None:
+        config = dict(request)
+        try:
+            manager = AutomationManager(config["host"], config["port"])
+            solution = manager.capture_and_solve(
+                config["backend"],
+                camera=config["camera"],
+                exposure=config["exposure"],
+                scale_low=config["scale_low"] or None,
+                scale_high=config["scale_high"] or None,
+                center_ra_deg=config["center_ra"] if config["pointing_hint"] else None,
+                center_dec_deg=config["center_dec"] if config["pointing_hint"] else None,
+                search_radius_deg=config["search_radius"],
+                downsample=config["downsample"],
+            )
+            self.solution_ready.emit(asdict(solution))
+        except Exception as exc:
+            self.error.emit("capture and solve", str(exc))
+
+
 class MainWindow(QMainWindow):
     request_connect = pyqtSignal(str)
     request_disconnect = pyqtSignal()
     request_poll = pyqtSignal()
     request_action = pyqtSignal(object)
+    request_automation_refresh = pyqtSignal(object)
+    request_capture_solve = pyqtSignal(object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -133,6 +174,7 @@ class MainWindow(QMainWindow):
         self.poll_in_flight = False
         self._shutting_down = False
         self._last_poll_error: Optional[str] = None
+        self._automation_ready = False
         self.control_widgets: list[QWidget] = []
 
         self.setWindowTitle("B1-AutoAlign Control Center")
@@ -141,6 +183,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._apply_style()
         self._start_worker()
+        self._start_automation_worker()
         self.refresh_ports()
         self._set_controls_enabled(False)
 
@@ -148,6 +191,7 @@ class MainWindow(QMainWindow):
         self.poll_timer.setInterval(750)
         self.poll_timer.timeout.connect(self._request_status)
         self.poll_timer.start()
+        QTimer.singleShot(750, self._refresh_automation)
 
     def _start_worker(self) -> None:
         self.worker_thread = QThread(self)
@@ -165,6 +209,17 @@ class MainWindow(QMainWindow):
         self.worker.trace.connect(self._log)
         self.worker_thread.start()
 
+    def _start_automation_worker(self) -> None:
+        self.automation_thread = QThread(self)
+        self.automation_worker = AutomationWorker()
+        self.automation_worker.moveToThread(self.automation_thread)
+        self.request_automation_refresh.connect(self.automation_worker.refresh)
+        self.request_capture_solve.connect(self.automation_worker.capture_and_solve)
+        self.automation_worker.report_ready.connect(self._on_automation_report)
+        self.automation_worker.solution_ready.connect(self._on_solution)
+        self.automation_worker.error.connect(self._on_automation_error)
+        self.automation_thread.start()
+
     def _build_ui(self) -> None:
         central = QWidget()
         root = QVBoxLayout(central)
@@ -174,7 +229,7 @@ class MainWindow(QMainWindow):
         title_row = QHBoxLayout()
         title = QLabel("B1-AutoAlign")
         title.setObjectName("Title")
-        subtitle = QLabel("Polar-alignment base control & calibration")
+        subtitle = QLabel("Polar-alignment base control, capture & plate solving")
         subtitle.setObjectName("Subtitle")
         title_box = QVBoxLayout()
         title_box.setSpacing(0)
@@ -374,6 +429,138 @@ class MainWindow(QMainWindow):
         setup_root.addWidget(calibration)
         setup_root.addStretch()
         tabs.addTab(setup_tab, "Reference & calibration")
+
+        automation_tab = QWidget()
+        automation_tab_root = QVBoxLayout(automation_tab)
+        automation_tab_root.setContentsMargins(0, 0, 0, 0)
+        automation_scroll = QScrollArea()
+        automation_scroll.setWidgetResizable(True)
+        automation_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        automation_content = QWidget()
+        automation_root = QVBoxLayout(automation_content)
+        automation_root.setContentsMargins(4, 8, 4, 4)
+
+        backend_group = QGroupBox("Capture and plate-solver backend")
+        backend_form = QFormLayout(backend_group)
+        self.backend_combo = QComboBox()
+        self.backend_combo.addItem("Automatic (prefer Ekos)", "auto")
+        self.backend_combo.addItem("Ekos / KStars", "ekos")
+        self.backend_combo.addItem("Standalone INDI + Astrometry.net", "standalone")
+        saved_backend = str(self.settings.value("automationBackend", "auto"))
+        saved_index = self.backend_combo.findData(saved_backend)
+        self.backend_combo.setCurrentIndex(max(0, saved_index))
+        self.backend_combo.currentIndexChanged.connect(self._refresh_automation)
+        backend_form.addRow("Mode", self.backend_combo)
+
+        endpoint_row = QHBoxLayout()
+        self.indi_host = QLineEdit(str(self.settings.value("indiHost", "localhost")))
+        self.indi_host.setPlaceholderText("localhost")
+        self.indi_port = QSpinBox()
+        self.indi_port.setRange(1, 65535)
+        self.indi_port.setValue(int(self.settings.value("indiPort", 7624)))
+        endpoint_row.addWidget(self.indi_host, 1)
+        endpoint_row.addWidget(self.indi_port)
+        backend_form.addRow("INDI server", endpoint_row)
+
+        refresh_automation = QPushButton("Detect backends")
+        refresh_automation.clicked.connect(self._refresh_automation)
+        self.refresh_automation_button = refresh_automation
+        backend_form.addRow("", refresh_automation)
+        automation_root.addWidget(backend_group)
+
+        readiness = QGroupBox("Readiness")
+        readiness_layout = QGridLayout(readiness)
+        readiness_fields = (
+            ("KStars / Ekos", "ekos"),
+            ("Camera", "camera"),
+            ("Local solver", "solver"),
+            ("INDI PAC", "pac"),
+            ("Selected", "selected"),
+        )
+        self.automation_values: dict[str, QLabel] = {}
+        for row, (caption, key) in enumerate(readiness_fields):
+            label = QLabel(caption)
+            label.setObjectName("FieldCaption")
+            value = QLabel("checking…")
+            value.setWordWrap(True)
+            self.automation_values[key] = value
+            readiness_layout.addWidget(label, row, 0)
+            readiness_layout.addWidget(value, row, 1)
+        readiness_layout.setColumnStretch(1, 1)
+        automation_root.addWidget(readiness)
+
+        test_group = QGroupBox("Capture & solve test — no motor movement")
+        test_form = QFormLayout(test_group)
+        self.camera_combo = QComboBox()
+        test_form.addRow("INDI camera", self.camera_combo)
+        self.exposure_input = QDoubleSpinBox()
+        self.exposure_input.setRange(0.01, 600.0)
+        self.exposure_input.setDecimals(2)
+        self.exposure_input.setValue(float(self.settings.value("captureExposure", 2.0)))
+        self.exposure_input.setSuffix(" s")
+        test_form.addRow("Exposure", self.exposure_input)
+        scale_row = QHBoxLayout()
+        self.scale_low_input = QDoubleSpinBox()
+        self.scale_high_input = QDoubleSpinBox()
+        for spin in (self.scale_low_input, self.scale_high_input):
+            spin.setRange(0.0, 100.0)
+            spin.setDecimals(3)
+            spin.setSpecialValueText("auto")
+            spin.setSuffix(" ″/px")
+        self.scale_low_input.setValue(float(self.settings.value("scaleLow", 0.0)))
+        self.scale_high_input.setValue(float(self.settings.value("scaleHigh", 0.0)))
+        scale_row.addWidget(self.scale_low_input)
+        scale_row.addWidget(QLabel("to"))
+        scale_row.addWidget(self.scale_high_input)
+        test_form.addRow("Scale hint", scale_row)
+        pointing_row = QHBoxLayout()
+        self.pointing_hint = QCheckBox("use")
+        self.pointing_hint.setChecked(str(self.settings.value("pointingHint", "false")).lower() == "true")
+        self.center_ra_input = QDoubleSpinBox()
+        self.center_ra_input.setRange(0.0, 360.0)
+        self.center_ra_input.setDecimals(4)
+        self.center_ra_input.setValue(float(self.settings.value("centerRa", 0.0)))
+        self.center_ra_input.setPrefix("RA ")
+        self.center_ra_input.setSuffix("°")
+        self.center_dec_input = QDoubleSpinBox()
+        self.center_dec_input.setRange(-90.0, 90.0)
+        self.center_dec_input.setDecimals(4)
+        self.center_dec_input.setValue(float(self.settings.value("centerDec", 0.0)))
+        self.center_dec_input.setPrefix("Dec ")
+        self.center_dec_input.setSuffix("°")
+        self.search_radius_input = QDoubleSpinBox()
+        self.search_radius_input.setRange(0.1, 180.0)
+        self.search_radius_input.setDecimals(1)
+        self.search_radius_input.setValue(float(self.settings.value("searchRadius", 15.0)))
+        self.search_radius_input.setPrefix("±")
+        self.search_radius_input.setSuffix("°")
+        pointing_row.addWidget(self.pointing_hint)
+        pointing_row.addWidget(self.center_ra_input)
+        pointing_row.addWidget(self.center_dec_input)
+        pointing_row.addWidget(self.search_radius_input)
+        test_form.addRow("Pointing hint", pointing_row)
+        self.downsample_input = QSpinBox()
+        self.downsample_input.setRange(1, 8)
+        self.downsample_input.setValue(int(self.settings.value("downsample", 2)))
+        test_form.addRow("Downsample", self.downsample_input)
+        self.capture_solve_button = QPushButton("Capture and solve once")
+        self.capture_solve_button.setObjectName("PrimaryButton")
+        self.capture_solve_button.setEnabled(False)
+        self.capture_solve_button.clicked.connect(self._capture_and_solve)
+        test_form.addRow("", self.capture_solve_button)
+        automation_root.addWidget(test_group)
+
+        lock_notice = QLabel(
+            "AUTOMATIC CORRECTION LOCKED — this milestone validates image acquisition and plate solving only. "
+            "It never moves ALT or AZ."
+        )
+        lock_notice.setObjectName("AutomationLock")
+        lock_notice.setWordWrap(True)
+        automation_root.addWidget(lock_notice)
+        automation_root.addStretch()
+        automation_scroll.setWidget(automation_content)
+        automation_tab_root.addWidget(automation_scroll)
+        tabs.addTab(automation_tab, "Automation")
         root.addWidget(tabs, 1)
         return panel
 
@@ -396,6 +583,10 @@ class MainWindow(QMainWindow):
             QLabel#SafetyBanner {
                 background: #232a38; border-left: 4px solid #6599ff;
                 border-radius: 5px; padding: 10px; color: #cbd5e8;
+            }
+            QLabel#AutomationLock {
+                background: #4b3513; border: 1px solid #79551b; border-radius: 5px;
+                padding: 8px; color: #ffd27a; font-weight: 700;
             }
             QLabel#FieldCaption { color: #8f9bb0; }
             QPushButton {
@@ -601,6 +792,96 @@ class MainWindow(QMainWindow):
     def _set_calibration(self, axis: str, value: float) -> None:
         self._send_action({"kind": "calibration", "axis": axis, "value": value})
 
+    def _automation_config(self) -> dict:
+        return {
+            "backend": str(self.backend_combo.currentData()),
+            "host": self.indi_host.text().strip() or "localhost",
+            "port": self.indi_port.value(),
+            "camera": self.camera_combo.currentText().strip(),
+            "exposure": self.exposure_input.value(),
+            "scale_low": self.scale_low_input.value(),
+            "scale_high": self.scale_high_input.value(),
+            "pointing_hint": self.pointing_hint.isChecked(),
+            "center_ra": self.center_ra_input.value(),
+            "center_dec": self.center_dec_input.value(),
+            "search_radius": self.search_radius_input.value(),
+            "downsample": self.downsample_input.value(),
+        }
+
+    @pyqtSlot()
+    def _refresh_automation(self) -> None:
+        self._automation_ready = False
+        self.refresh_automation_button.setEnabled(False)
+        self.capture_solve_button.setEnabled(False)
+        self.automation_values["selected"].setText("checking…")
+        self.request_automation_refresh.emit(self._automation_config())
+
+    @pyqtSlot(object)
+    def _on_automation_report(self, report: object) -> None:
+        data = dict(report)
+        ekos = dict(data["ekos"])
+        solver = dict(data["solver"])
+        cameras = [dict(camera)["name"] for camera in data["cameras"]]
+        current_camera = self.camera_combo.currentText()
+        self.camera_combo.clear()
+        self.camera_combo.addItems(cameras)
+        if current_camera in cameras:
+            self.camera_combo.setCurrentText(current_camera)
+
+        if ekos["running"]:
+            version = ekos["version"] or "running"
+            self.automation_values["ekos"].setText(f"{version} — {ekos['detail']}")
+        else:
+            self.automation_values["ekos"].setText(ekos["detail"])
+        camera_text = ", ".join(cameras) if cameras else "no INDI camera detected"
+        if ekos["camera"]:
+            camera_text = f"Ekos: {ekos['camera']}" + (f"; INDI: {camera_text}" if cameras else "")
+        self.automation_values["camera"].setText(camera_text)
+        self.automation_values["solver"].setText(solver["detail"])
+        pac_devices = list(data["pac_devices"])
+        self.automation_values["pac"].setText(
+            ", ".join(pac_devices) if pac_devices else "not exposed by the connected INDI version/device"
+        )
+        selected = data["selected_backend"]
+        selected_name = {"ekos": "Ekos / KStars", "standalone": "Standalone INDI", "none": "not ready"}[selected]
+        self.automation_values["selected"].setText(f"{selected_name} — {data['detail']}")
+        self._automation_ready = bool(data["ready"])
+        self.refresh_automation_button.setEnabled(True)
+        self.capture_solve_button.setEnabled(self._automation_ready)
+        self._log(f"Automation check: {data['detail']}")
+        for warning in data["warnings"]:
+            self._log(f"Automation: {warning}")
+
+    @pyqtSlot()
+    def _capture_and_solve(self) -> None:
+        if not self._automation_ready:
+            return
+        self.capture_solve_button.setEnabled(False)
+        self.refresh_automation_button.setEnabled(False)
+        self._log("Starting one capture-and-solve test; motor correction remains locked")
+        self.request_capture_solve.emit(self._automation_config())
+
+    @pyqtSlot(object)
+    def _on_solution(self, solution: object) -> None:
+        data = dict(solution)
+        orientation = "" if data["orientation_deg"] is None else f", orientation {data['orientation_deg']:.3f}°"
+        self._log(
+            f"Plate solution via {data['backend']}: RA {data['ra_deg']:.6f}°, "
+            f"Dec {data['dec_deg']:.6f}°{orientation}"
+        )
+        if data["image_path"]:
+            self._log(f"Captured image: {data['image_path']}")
+        self.refresh_automation_button.setEnabled(True)
+        self.capture_solve_button.setEnabled(self._automation_ready)
+
+    @pyqtSlot(str, str)
+    def _on_automation_error(self, context: str, message: str) -> None:
+        self.refresh_automation_button.setEnabled(True)
+        self.capture_solve_button.setEnabled(self._automation_ready)
+        self._log(f"{context.capitalize()} error: {message}")
+        if context == "capture and solve":
+            QMessageBox.warning(self, "Capture and solve failed", message)
+
     @pyqtSlot(str)
     def _log(self, message: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
@@ -611,6 +892,17 @@ class MainWindow(QMainWindow):
         self.settings.setValue("altAmount", self.alt_amount.value())
         self.settings.setValue("azAmount", self.az_amount.value())
         self.settings.setValue("rawSteps", self.raw_steps.value())
+        self.settings.setValue("automationBackend", self.backend_combo.currentData())
+        self.settings.setValue("indiHost", self.indi_host.text().strip() or "localhost")
+        self.settings.setValue("indiPort", self.indi_port.value())
+        self.settings.setValue("captureExposure", self.exposure_input.value())
+        self.settings.setValue("scaleLow", self.scale_low_input.value())
+        self.settings.setValue("scaleHigh", self.scale_high_input.value())
+        self.settings.setValue("pointingHint", self.pointing_hint.isChecked())
+        self.settings.setValue("centerRa", self.center_ra_input.value())
+        self.settings.setValue("centerDec", self.center_dec_input.value())
+        self.settings.setValue("searchRadius", self.search_radius_input.value())
+        self.settings.setValue("downsample", self.downsample_input.value())
 
     def shutdown(self) -> None:
         if self._shutting_down:
@@ -626,6 +918,9 @@ class MainWindow(QMainWindow):
             )
             self.worker_thread.quit()
             self.worker_thread.wait(2000)
+        if self.automation_thread.isRunning():
+            self.automation_thread.quit()
+            self.automation_thread.wait(10000)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.shutdown()

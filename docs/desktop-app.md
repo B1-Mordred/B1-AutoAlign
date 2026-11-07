@@ -13,6 +13,9 @@ The B1-AutoAlign Control Center is a native PyQt6 application for Linux. It keep
 - mark the physical ALT bottom and upper soft limit;
 - clear the upper ALT limit;
 - store ALT and AZ steps-per-arcminute calibration;
+- detect and prefer an available Ekos/KStars capture-and-solve backend;
+- fall back to a standard INDI camera plus local Astrometry.net;
+- perform an explicit single capture-and-solve test without moving either PA axis;
 - maintain a timestamped command and activity log.
 
 ## Firmware safety gate
@@ -53,6 +56,15 @@ No root privileges are used. The launcher remains tied to the current repository
 
 Only one application can own the serial device at a time. Disconnect the B1-AutoAlign device in Ekos/INDI before connecting the desktop app. A port-busy error is shown when another process owns it.
 
+## Automation tab
+
+The Automation tab probes both supported acquisition paths in a worker thread:
+
+1. **Ekos/KStars:** uses the public session D-Bus Align interface. The app forces solver action `2` (solve only), calls `captureAndSolve(true)`, waits for the terminal status and reads the RA/Dec/orientation result. It does not sync or slew the mount.
+2. **Standalone:** discovers cameras through the standard INDI `CCD_EXPOSURE` property, receives the next `CCD1` FITS BLOB and solves it with local `solve-field`/`wcsinfo`.
+
+Automatic mode prefers a fully ready Ekos path and otherwise selects the standalone path. See [Automation backends](automation-backends.md) for setup and the live compatibility boundary.
+
 ## Automatic polar-alignment boundary
 
-This first desktop release controls and manages the motorized PA base. It does not yet capture images or calculate the correction vector. Closed-loop automatic polar alignment will require plate-solve/error data from Ekos, most likely through KStars D-Bus or an INDI-facing integration. That is a separate milestone from safe motor control.
+The app can now acquire and plate-solve a test frame, but it does not yet run the three-frame polar-error measurement or send a computed correction to the motors. The interface shows **AUTOMATIC CORRECTION LOCKED**, and the automation code has no motor-client reference. This keeps camera/solver qualification separate from physical motion qualification.

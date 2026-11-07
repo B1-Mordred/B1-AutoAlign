@@ -4,7 +4,7 @@
 
 B1-AutoAlign is minimal ESP32 firmware for the motorized altitude/azimuth polar-alignment base derived from the OpenAstroExplorer hardware layout. It controls only the two polar-alignment axes and deliberately excludes RA/DEC tracking, GoTo, guiding, focuser, GPS, display and Wi-Fi features.
 
-The repository also includes a native PyQt6 desktop control center for connection management, live position/status monitoring, safe ALT/AZ jogging, reference and limit management, and calibration.
+The repository also includes a native PyQt6 desktop control center for connection management, live position/status monitoring, safe ALT/AZ jogging, reference and limit management, calibration, and camera/plate-solver backend preparation.
 
 The firmware identifies itself as `B1-AutoAlign` over the LX200-compatible serial protocol and is intended to work with the patched INDI `LX200 OpenAstroTech` driver used by Ekos.
 
@@ -23,6 +23,9 @@ The firmware identifies itself as `B1-AutoAlign` over the LX200-compatible seria
 - PA-specific status, limit and calibration commands
 - no automatic movement at startup
 - native Linux desktop app with strict legacy-firmware read-only mode
+- Ekos/KStars capture-and-solve integration over D-Bus, with solve-only action
+- automatic fallback to a standard INDI camera and local Astrometry.net solver
+- explicit correction lock: the new automation backend cannot move ALT or AZ
 
 ## Repository layout
 
@@ -65,6 +68,7 @@ Before any future upload, read [Safety](docs/safety.md), make a flash backup, su
 - [Hardware mapping](docs/hardware.md)
 - [Serial protocol](docs/protocol.md)
 - [Desktop application](docs/desktop-app.md)
+- [Automation backends](docs/automation-backends.md)
 - [Ekos/INDI integration](docs/ekos-indi.md)
 - [Safety and first-motion procedure](docs/safety.md)
 - [Validation status](docs/validation.md)
