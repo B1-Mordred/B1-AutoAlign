@@ -1,0 +1,33 @@
+# Hardware mapping
+
+## Controller
+
+B1-AutoAlign currently targets an ESP32 using the OpenAstroExplorer board v1 pinout.
+
+| Axis | STEP | DIR | ENABLE |
+|---|---:|---:|---:|
+| ALT | GPIO13 | GPIO23 | GPIO4 |
+| AZ | GPIO18 | GPIO19 | GPIO32 |
+
+ENABLE is assumed to be active-low, as with common A4988-compatible stepper interfaces.
+
+## Direction
+
+A positive ALT command must move the base upward and away from its lower mechanical stop. Direction inversion is controlled by `ALT_DIR_INVERT` and `AZ_DIR_INVERT` near the top of the sketch.
+
+The current values have not yet been physically verified with B1-AutoAlign. Test with a tiny positive move and no unsupported telescope load before changing them.
+
+## Calibration
+
+The migration defaults are:
+
+- ALT: 100 driver steps per arcminute
+- AZ: 11 driver steps per arcminute
+
+These reproduce the observed command-to-counter conversion of the previous firmware. They are not a verified measurement of real base rotation. Belt ratio, lead screw pitch, microstepping and mechanical compliance all affect the final value.
+
+## Position model
+
+Both axes are open-loop. The firmware cannot detect a stalled motor, lost steps, a slipping coupling or manual motion while powered off. The saved counter is therefore not a substitute for mechanical stops, limit switches or a reference procedure.
+
+The 25 kg total system mass is a mechanical design and motor/driver requirement; compiling or operating this firmware does not validate that load capacity.

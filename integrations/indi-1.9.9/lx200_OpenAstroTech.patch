@@ -1,0 +1,28 @@
+--- indi-1.9.9/drivers/telescope/lx200_OpenAstroTech.cpp
++++ indi-1.9.9-b1-autoalign/drivers/telescope/lx200_OpenAstroTech.cpp
+@@
+-    IUFillNumber(&PolarAlignAltN, "OAT_POLAR_ALT", "Arcsecs", "%.f", -500.0, 500.0, 10.0, 0);
++    IUFillNumber(&PolarAlignAltN, "OAT_POLAR_ALT", "Arcmin", "%.f", -140.0, 140.0, 1.0, 0);
+@@
+-    IUFillNumber(&PolarAlignAzN, "OAT_POLAR_AZ", "Arcsecs", "%.f", -500.0, 500.0, 10.0, 0);
++    IUFillNumber(&PolarAlignAzN, "OAT_POLAR_AZ", "Arcmin", "%.f", -320.0, 320.0, 1.0, 0);
+@@
+-        if (!strcmp(name, PolarAlignAltN.name))
++        if (!strcmp(name, PolarAlignAltN.name) || !strcmp(name, PolarAlignAltNP.name))
+@@
+-            executeMeadeCommandBlind(read_buffer);
+-            PolarActive = true;
+-            PolarAlignAltNP.s = IPS_BUSY;
++            const bool sendFailed = executeMeadeCommandBlind(read_buffer);
++            PolarActive = false;
++            PolarAlignAltNP.s = sendFailed ? IPS_ALERT : IPS_OK;
+@@
+-        if (!strcmp(name, PolarAlignAzN.name))
++        if (!strcmp(name, PolarAlignAzN.name) || !strcmp(name, PolarAlignAzNP.name))
+@@
+-            executeMeadeCommandBlind(read_buffer);
+-            PolarActive = true;
+-            PolarAlignAzNP.s = IPS_BUSY;
++            const bool sendFailed = executeMeadeCommandBlind(read_buffer);
++            PolarActive = false;
++            PolarAlignAzNP.s = sendFailed ? IPS_ALERT : IPS_OK;

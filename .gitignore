@@ -1,0 +1,11 @@
+build/
+.arduino/
+*.bin
+*.elf
+*.map
+*.zip
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/
+*~
