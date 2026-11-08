@@ -200,6 +200,7 @@ class MainWindow(QMainWindow):
         self._last_poll_error: Optional[str] = None
         self._automation_ready = False
         self.control_widgets: list[QWidget] = []
+        self.axis_position_values: dict[str, QLabel] = {}
 
         self.setWindowTitle("B1-AutoAlign Control Center")
         self.setMinimumSize(980, 680)
@@ -346,6 +347,13 @@ class MainWindow(QMainWindow):
     def _axis_group(self, axis: str, maximum: float) -> QGroupBox:
         group = QGroupBox(f"{axis} jog")
         layout = QGridLayout(group)
+        position_caption = QLabel("Current position")
+        position_caption.setObjectName("FieldCaption")
+        position_value = QLabel("— steps")
+        position_value.setObjectName("PositionReadout")
+        position_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        position_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.axis_position_values[axis] = position_value
         amount = QDoubleSpinBox()
         amount.setDecimals(3)
         amount.setRange(0.001, maximum)
@@ -355,10 +363,12 @@ class MainWindow(QMainWindow):
         positive = QPushButton(f"+ {axis}")
         negative.clicked.connect(lambda _checked=False, a=axis, s=amount: self._move_arcmin(a, -s.value()))
         positive.clicked.connect(lambda _checked=False, a=axis, s=amount: self._move_arcmin(a, s.value()))
-        layout.addWidget(QLabel("Relative amount"), 0, 0, 1, 2)
-        layout.addWidget(amount, 1, 0, 1, 2)
-        layout.addWidget(negative, 2, 0)
-        layout.addWidget(positive, 2, 1)
+        layout.addWidget(position_caption, 0, 0, 1, 2)
+        layout.addWidget(position_value, 1, 0, 1, 2)
+        layout.addWidget(QLabel("Relative amount"), 2, 0, 1, 2)
+        layout.addWidget(amount, 3, 0, 1, 2)
+        layout.addWidget(negative, 4, 0)
+        layout.addWidget(positive, 4, 1)
         self.control_widgets.extend([amount, negative, positive])
         if axis == "ALT":
             self.alt_amount = amount
@@ -693,6 +703,10 @@ class MainWindow(QMainWindow):
                 padding: 8px; color: #ffd27a; font-weight: 700;
             }
             QLabel#FieldCaption { color: #8f9bb0; }
+            QLabel#PositionReadout {
+                background: #10141b; border: 1px solid #3a4354; border-radius: 6px;
+                padding: 8px; color: #f5f7ff; font-size: 20px; font-weight: 700;
+            }
             QPushButton {
                 background: #2b3342; border: 1px solid #414b5f; border-radius: 6px;
                 padding: 7px 12px;
@@ -800,6 +814,8 @@ class MainWindow(QMainWindow):
         self.status_values["fault"].setText(data["fault"])
         self.status_values["alt_position"].setText(f"{data['alt_steps']:,} steps")
         self.status_values["az_position"].setText(f"{data['az_steps']:,} steps")
+        self.axis_position_values["ALT"].setText(f"{data['alt_steps']:,} steps")
+        self.axis_position_values["AZ"].setText(f"{data['az_steps']:,} steps")
         if data["alt_min"] is None:
             self.status_values["alt_limits"].setText("unavailable on legacy firmware")
         else:
