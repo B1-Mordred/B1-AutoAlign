@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "b1-autoalign"
-version = "0.2.3"
+version = "0.3.0"
 description = "Desktop control and management application for the B1-AutoAlign polar-alignment base"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "EndstopInput.h"
 #include "MotionAxis.h"
 
 namespace Config
@@ -34,6 +35,8 @@ constexpr uint8_t ALT_EN_PIN   = 4;
 constexpr uint8_t AZ_STEP_PIN  = 18;
 constexpr uint8_t AZ_DIR_PIN   = 19;
 constexpr uint8_t AZ_EN_PIN    = 32;
+constexpr uint8_t SENSOR1_PIN  = 39;
+constexpr uint8_t SENSOR2_PIN  = 36;
 
 // A4988-style enables are active low.
 constexpr bool ENABLE_ACTIVE_LOW = true;
@@ -59,7 +62,9 @@ constexpr HoldMode DEFAULT_HOLD_MODE = HoldMode::Always;
 constexpr float MAX_ALT_COMMAND_ARCMIN = 140.0f;
 constexpr float MAX_AZ_COMMAND_ARCMIN = 320.0f;
 constexpr int32_t MAX_RAW_JOG_STEPS = 100000;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 3;
+constexpr int32_t HOME_SEARCH_STEPS = 100000;
+constexpr uint32_t ENDSTOP_DEBOUNCE_MS = 5;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 4;
 
 // Migration defaults measured with the currently installed V1.13.16 setup.
 // Calibrate these against real angular movement before automated alignment.
@@ -81,6 +86,8 @@ StepDirAxis azimuth("AZ", Config::AZ_STEP_PIN, Config::AZ_DIR_PIN, Config::AZ_EN
                     Config::DEFAULT_AZ_DIR_INVERT,
                     Config::ENABLE_ACTIVE_LOW, Config::AZ_MAX_SPEED, Config::AZ_ACCEL, Config::START_SPEED,
                     Config::STEP_PULSE_US, Config::MOTION_TIMEOUT_MS);
+DebouncedEndstop sensor1(Config::SENSOR1_PIN, Config::ENDSTOP_DEBOUNCE_MS);
+DebouncedEndstop sensor2(Config::SENSOR2_PIN, Config::ENDSTOP_DEBOUNCE_MS);
 
 float altStepsPerArcmin = Config::DEFAULT_ALT_STEPS_PER_ARCMIN;
 float azStepsPerArcmin  = Config::DEFAULT_AZ_STEPS_PER_ARCMIN;
@@ -93,6 +100,10 @@ HoldMode holdMode = Config::DEFAULT_HOLD_MODE;
 uint32_t holdDelayMs = Config::DEFAULT_HOLD_DELAY_MS;
 bool altDirInvert = Config::DEFAULT_ALT_DIR_INVERT;
 bool azDirInvert = Config::DEFAULT_AZ_DIR_INVERT;
+std::atomic<uint8_t> altEndstopSource{static_cast<uint8_t>(EndstopSource::Disabled)};
+std::atomic<uint8_t> altEndstopSide{static_cast<uint8_t>(EndstopSide::Minimum)};
+std::atomic<uint8_t> azEndstopSource{static_cast<uint8_t>(EndstopSource::Disabled)};
+std::atomic<uint8_t> azEndstopSide{static_cast<uint8_t>(EndstopSide::Minimum)};
 bool positionDirty = false;
 uint32_t lastPositionChangeMs = 0;
 char lastFault[32] = "NONE";
@@ -108,11 +119,23 @@ enum MotionEvent : uint32_t
     MotionAzTimedOut = 1U << 2,
     MotionTimerFailed = 1U << 3,
     MotionCompleted = 1U << 4,
+    MotionAltEndstop = 1U << 5,
+    MotionAzEndstop = 1U << 6,
+    MotionAltHomeNotFound = 1U << 7,
+    MotionAzHomeNotFound = 1U << 8,
+};
+
+enum class HomingAxis : uint8_t
+{
+    None = 0,
+    Altitude = 1,
+    Azimuth = 2,
 };
 
 esp_timer_handle_t motionTimer = nullptr;
 std::atomic<uint32_t> pendingMotionEvents{0};
 std::atomic<bool> motionTimerReady{false};
+std::atomic<uint8_t> homingAxis{static_cast<uint8_t>(HomingAxis::None)};
 
 void setFault(const char *fault)
 {
@@ -127,21 +150,81 @@ void markPositionDirty()
 }
 
 void persistPositions(bool force);
+void persistConfiguration();
+
+EndstopSource configuredSource(bool altitudeAxis)
+{
+    const uint8_t value = altitudeAxis ? altEndstopSource.load(std::memory_order_acquire) :
+                                         azEndstopSource.load(std::memory_order_acquire);
+    return static_cast<EndstopSource>(value);
+}
+
+EndstopSide configuredSide(bool altitudeAxis)
+{
+    const uint8_t value = altitudeAxis ? altEndstopSide.load(std::memory_order_acquire) :
+                                         azEndstopSide.load(std::memory_order_acquire);
+    return static_cast<EndstopSide>(value);
+}
+
+bool sourceIsActive(EndstopSource source)
+{
+    if (source == EndstopSource::Sensor1)
+        return sensor1.isActive();
+    if (source == EndstopSource::Sensor2)
+        return sensor2.isActive();
+    return false;
+}
+
+bool endstopBlocksAxis(bool altitudeAxis, int8_t direction)
+{
+    const EndstopSource source = configuredSource(altitudeAxis);
+    return endstopBlocksDirection(source != EndstopSource::Disabled, sourceIsActive(source),
+                                  configuredSide(altitudeAxis), direction);
+}
+
+bool referenceAxisAtEndstop(bool altitudeAxis);
 
 void serviceMotionTimer(void *)
 {
     const uint32_t nowUs = micros();
     const uint32_t nowMs = millis();
-    const ServiceResult altResult = altitude.service(nowUs, nowMs);
-    const ServiceResult azResult = azimuth.service(nowUs, nowMs);
+    sensor1.service(nowMs);
+    sensor2.service(nowMs);
+
+    const bool altBlocked = endstopBlocksAxis(true, altitude.directionOfMotion());
+    const bool azBlocked = endstopBlocksAxis(false, azimuth.directionOfMotion());
+    ServiceResult altResult = ServiceResult::Idle;
+    ServiceResult azResult = ServiceResult::Idle;
 
     uint32_t events = 0;
+    if (altBlocked || azBlocked)
+    {
+        altitude.stopNow(nowMs);
+        azimuth.stopNow(nowMs);
+        events |= MotionPositionChanged | MotionCompleted;
+        if (altBlocked)
+            events |= MotionAltEndstop;
+        if (azBlocked)
+            events |= MotionAzEndstop;
+    }
+    else
+    {
+        altResult = altitude.service(nowUs, nowMs);
+        azResult = azimuth.service(nowUs, nowMs);
+    }
+
     if (altResult == ServiceResult::Stepped || altResult == ServiceResult::Completed ||
         altResult == ServiceResult::TimedOut || azResult == ServiceResult::Stepped ||
         azResult == ServiceResult::Completed || azResult == ServiceResult::TimedOut)
         events |= MotionPositionChanged;
     if (altResult == ServiceResult::Completed || azResult == ServiceResult::Completed)
         events |= MotionCompleted;
+
+    const HomingAxis activeHome = static_cast<HomingAxis>(homingAxis.load(std::memory_order_acquire));
+    if (activeHome == HomingAxis::Altitude && altResult == ServiceResult::Completed)
+        events |= MotionAltHomeNotFound;
+    if (activeHome == HomingAxis::Azimuth && azResult == ServiceResult::Completed)
+        events |= MotionAzHomeNotFound;
 
     if (altResult == ServiceResult::TimedOut || azResult == ServiceResult::TimedOut)
     {
@@ -198,17 +281,75 @@ bool startMotionTimer()
     return true;
 }
 
+bool referenceAxisAtEndstop(bool altitudeAxis)
+{
+    const EndstopSide side = configuredSide(altitudeAxis);
+    if (altitudeAxis)
+    {
+        if (side == EndstopSide::Minimum)
+            altitude.setCurrentPosition(Config::DEFAULT_ALT_MIN);
+        else
+        {
+            if (!altMaxEnabled)
+                return false;
+            altitude.setCurrentPosition(altMaxPosition);
+        }
+        altitude.setLimits(true, Config::DEFAULT_ALT_MIN, altMaxEnabled, altMaxPosition);
+    }
+    else
+    {
+        if (side == EndstopSide::Minimum)
+        {
+            azimuth.setCurrentPosition(0);
+            azMinEnabled = true;
+        }
+        else
+        {
+            if (!azMaxEnabled)
+                return false;
+            azimuth.setCurrentPosition(azMaxPosition);
+        }
+        azimuth.setLimits(azMinEnabled, 0, azMaxEnabled, azMaxPosition);
+    }
+    persistConfiguration();
+    markPositionDirty();
+    persistPositions(true);
+    return true;
+}
+
 void consumeMotionEvents()
 {
     const uint32_t events = pendingMotionEvents.exchange(0, std::memory_order_acq_rel);
     if ((events & MotionPositionChanged) != 0)
         markPositionDirty();
+    const HomingAxis activeHome = static_cast<HomingAxis>(homingAxis.load(std::memory_order_acquire));
+    const bool altEndstopHit = (events & MotionAltEndstop) != 0;
+    const bool azEndstopHit = (events & MotionAzEndstop) != 0;
+    const bool altReferenced = !altEndstopHit || referenceAxisAtEndstop(true);
+    const bool azReferenced = !azEndstopHit || referenceAxisAtEndstop(false);
+
+    if (altEndstopHit || azEndstopHit || (events & (MotionAltHomeNotFound | MotionAzHomeNotFound)) != 0 ||
+        (events & (MotionAltTimedOut | MotionAzTimedOut | MotionTimerFailed)) != 0)
+        homingAxis.store(static_cast<uint8_t>(HomingAxis::None), std::memory_order_release);
+
     if ((events & MotionTimerFailed) != 0)
         setFault("MOTION_TIMER");
     else if ((events & MotionAltTimedOut) != 0)
         setFault("ALT_TIMEOUT");
     else if ((events & MotionAzTimedOut) != 0)
         setFault("AZ_TIMEOUT");
+    else if ((events & MotionAltHomeNotFound) != 0)
+        setFault("ALT_HOME_NOT_FOUND");
+    else if ((events & MotionAzHomeNotFound) != 0)
+        setFault("AZ_HOME_NOT_FOUND");
+    else if (altEndstopHit && azEndstopHit)
+        setFault("BOTH_ENDSTOP");
+    else if (altEndstopHit)
+        setFault(!altReferenced ? "ALT_ENDSTOP_UNREF" :
+                 (activeHome == HomingAxis::Altitude ? "ALT_HOMED" : "ALT_ENDSTOP"));
+    else if (azEndstopHit)
+        setFault(!azReferenced ? "AZ_ENDSTOP_UNREF" :
+                 (activeHome == HomingAxis::Azimuth ? "AZ_HOMED" : "AZ_ENDSTOP"));
     if ((events & MotionCompleted) != 0 && !altitude.isMoving() && !azimuth.isMoving())
         persistPositions(true);
 }
@@ -250,6 +391,10 @@ void persistConfiguration()
     preferences.putUInt("holdDelay", holdDelayMs);
     preferences.putBool("altInv", altDirInvert);
     preferences.putBool("azInv", azDirInvert);
+    preferences.putUChar("altEsSrc", altEndstopSource.load(std::memory_order_acquire));
+    preferences.putUChar("altEsSide", altEndstopSide.load(std::memory_order_acquire));
+    preferences.putUChar("azEsSrc", azEndstopSource.load(std::memory_order_acquire));
+    preferences.putUChar("azEsSide", azEndstopSide.load(std::memory_order_acquire));
 }
 
 bool limitsReady()
@@ -344,12 +489,80 @@ bool parseDirectionPair(const char *text, bool &altInverted, bool &azInverted)
     return true;
 }
 
+bool parseEndstopConfiguration(const char *text, uint8_t &altSource, uint8_t &altSide,
+                               uint8_t &azSource, uint8_t &azSide)
+{
+    if (text == nullptr || *text == '\0')
+        return false;
+    long values[4] = {};
+    const char *cursor = text;
+    for (size_t index = 0; index < 4; ++index)
+    {
+        char *end = nullptr;
+        errno = 0;
+        values[index] = strtol(cursor, &end, 10);
+        if (end == cursor || errno == ERANGE)
+            return false;
+        if (index < 3)
+        {
+            if (*end != ',')
+                return false;
+            cursor = end + 1;
+        }
+        else if (*end != '\0')
+            return false;
+    }
+    if (values[0] < 0 || values[0] > 2 || values[1] < 0 || values[1] > 1 ||
+        values[2] < 0 || values[2] > 2 || values[3] < 0 || values[3] > 1 ||
+        (values[0] != 0 && values[0] == values[2]))
+        return false;
+    altSource = static_cast<uint8_t>(values[0]);
+    altSide = static_cast<uint8_t>(values[1]);
+    azSource = static_cast<uint8_t>(values[2]);
+    azSide = static_cast<uint8_t>(values[3]);
+    return true;
+}
+
 bool arcminutesToSteps(float arcminutes, float calibration, int32_t &steps)
 {
     const double requested = static_cast<double>(arcminutes) * calibration;
     if (requested < INT32_MIN || requested > INT32_MAX)
         return false;
     steps = static_cast<int32_t>(llround(requested));
+    return true;
+}
+
+bool targetBlockedByEndstop(bool altitudeAxis, int32_t target)
+{
+    StepDirAxis &axis = altitudeAxis ? altitude : azimuth;
+    const int32_t current = axis.position();
+    const int8_t direction = target > current ? 1 : (target < current ? -1 : 0);
+    if (!endstopBlocksAxis(altitudeAxis, direction))
+        return false;
+    setFault(altitudeAxis ? "ALT_ENDSTOP" : "AZ_ENDSTOP");
+    return true;
+}
+
+bool startRelativeAxisMove(bool altitudeAxis, int32_t delta, bool returnAck)
+{
+    StepDirAxis &axis = altitudeAxis ? altitude : azimuth;
+    int32_t target = axis.position();
+    const MoveResult result = axis.calculateRelativeTarget(delta, target);
+    if (result != MoveResult::Accepted)
+    {
+        reportMoveResult(result, returnAck);
+        return false;
+    }
+    if (targetBlockedByEndstop(altitudeAxis, target))
+    {
+        if (returnAck)
+            Serial.print('0');
+        return false;
+    }
+    axis.startValidatedMove(target, micros(), millis());
+    setFault("NONE");
+    if (returnAck)
+        Serial.print('1');
     return true;
 }
 
@@ -377,6 +590,8 @@ bool startAtomicRelativeMove(int32_t azDelta, int32_t altDelta)
         reportMoveResult(altResult, false);
         return false;
     }
+    if (targetBlockedByEndstop(false, azTarget) || targetBlockedByEndstop(true, altTarget))
+        return false;
 
     const uint32_t nowUs = micros();
     const uint32_t nowMs = millis();
@@ -402,6 +617,8 @@ bool startAtomicAbsoluteMove(int32_t azTarget, int32_t altTarget)
         reportMoveResult(altResult, false);
         return false;
     }
+    if (targetBlockedByEndstop(false, azTarget) || targetBlockedByEndstop(true, altTarget))
+        return false;
 
     const uint32_t nowUs = micros();
     const uint32_t nowMs = millis();
@@ -411,8 +628,92 @@ bool startAtomicAbsoluteMove(int32_t azTarget, int32_t altTarget)
     return true;
 }
 
+bool startEndstopHome(bool altitudeAxis)
+{
+    if (!motionAvailable(false) || altitude.isMoving() || azimuth.isMoving())
+    {
+        setFault(motionTimerReady.load(std::memory_order_acquire) ? "BUSY" : "MOTION_TIMER");
+        return false;
+    }
+    const EndstopSource source = configuredSource(altitudeAxis);
+    if (source == EndstopSource::Disabled)
+    {
+        setFault(altitudeAxis ? "ALT_ENDSTOP_OFF" : "AZ_ENDSTOP_OFF");
+        return false;
+    }
+    const EndstopSide side = configuredSide(altitudeAxis);
+    if (side == EndstopSide::Maximum &&
+        ((altitudeAxis && !altMaxEnabled) || (!altitudeAxis && !azMaxEnabled)))
+    {
+        setFault(altitudeAxis ? "ALT_MAX_UNSET" : "AZ_MAX_UNSET");
+        return false;
+    }
+    if (sourceIsActive(source))
+    {
+        if (!referenceAxisAtEndstop(altitudeAxis))
+        {
+            setFault(altitudeAxis ? "ALT_ENDSTOP_UNREF" : "AZ_ENDSTOP_UNREF");
+            return false;
+        }
+        setFault(altitudeAxis ? "ALT_HOMED" : "AZ_HOMED");
+        return true;
+    }
+
+    StepDirAxis &axis = altitudeAxis ? altitude : azimuth;
+    const HomingAxis requestedHome = altitudeAxis ? HomingAxis::Altitude : HomingAxis::Azimuth;
+    homingAxis.store(static_cast<uint8_t>(requestedHome), std::memory_order_release);
+    const int8_t direction = side == EndstopSide::Minimum ? -1 : 1;
+    const MoveResult result = axis.startHomingMove(direction, Config::HOME_SEARCH_STEPS, micros(), millis());
+    if (result != MoveResult::Accepted)
+    {
+        homingAxis.store(static_cast<uint8_t>(HomingAxis::None), std::memory_order_release);
+        reportMoveResult(result, false);
+        return false;
+    }
+    setFault("NONE");
+    return true;
+}
+
 void handlePaExtension(const char *body)
 {
+    if (strncmp(body, "PES", 3) == 0)
+    {
+        uint8_t requestedAltSource = 0;
+        uint8_t requestedAltSide = 0;
+        uint8_t requestedAzSource = 0;
+        uint8_t requestedAzSide = 0;
+        if (!parseEndstopConfiguration(body + 3, requestedAltSource, requestedAltSide,
+                                       requestedAzSource, requestedAzSide))
+        {
+            setFault("BAD_ENDSTOP_CONFIG");
+            Serial.print("0#");
+            return;
+        }
+        if (altitude.isMoving() || azimuth.isMoving())
+        {
+            setFault("BUSY");
+            Serial.print("0#");
+            return;
+        }
+        altEndstopSource.store(requestedAltSource, std::memory_order_release);
+        altEndstopSide.store(requestedAltSide, std::memory_order_release);
+        azEndstopSource.store(requestedAzSource, std::memory_order_release);
+        azEndstopSide.store(requestedAzSide, std::memory_order_release);
+        persistConfiguration();
+        setFault("NONE");
+        Serial.print("1#");
+        return;
+    }
+    if (strcmp(body, "PHEA") == 0)
+    {
+        Serial.print(startEndstopHome(true) ? "1#" : "0#");
+        return;
+    }
+    if (strcmp(body, "PHEZ") == 0)
+    {
+        Serial.print(startEndstopHome(false) ? "1#" : "0#");
+        return;
+    }
     if (strcmp(body, "PAB") == 0)  // Mark current ALT position as bottom/zero.
     {
         if (altitude.isMoving())
@@ -547,8 +848,11 @@ void handlePaExtension(const char *body)
     }
     if (strcmp(body, "PGL") == 0)
     {
-        const char *state = altitude.isMoving() ? (azimuth.isMoving() ? "BOTH" : "ALT") :
-                            (azimuth.isMoving() ? "AZ" : "IDLE");
+        const HomingAxis activeHome = static_cast<HomingAxis>(homingAxis.load(std::memory_order_acquire));
+        const char *state = activeHome == HomingAxis::Altitude ? "HOME_ALT" :
+                            (activeHome == HomingAxis::Azimuth ? "HOME_AZ" :
+                            (altitude.isMoving() ? (azimuth.isMoving() ? "BOTH" : "ALT") :
+                            (azimuth.isMoving() ? "AZ" : "IDLE")));
         Serial.printf("AZ=%ld,ALT=%ld,AZMIN=", static_cast<long>(azimuth.position()),
                       static_cast<long>(altitude.position()));
         if (azMinEnabled)
@@ -566,12 +870,18 @@ void handlePaExtension(const char *body)
         else
             Serial.print("NA");
         Serial.printf(",AZTARGET=%ld,ALTTARGET=%ld,ACAL=%.4f,ZCAL=%.4f,STATE=%s,FAULT=%s,"
-                      "HOLD=%u,HOLDMS=%lu,AZEN=%u,ALTEN=%u,ALTINV=%u,AZINV=%u,LIMITS=%u,SCHEMA=%lu#",
+                      "HOLD=%u,HOLDMS=%lu,AZEN=%u,ALTEN=%u,ALTINV=%u,AZINV=%u,"
+                      "ES1=%u,ES2=%u,ALTES=%u,ALTESIDE=%u,AZES=%u,AZESIDE=%u,LIMITS=%u,SCHEMA=%lu#",
                       static_cast<long>(azimuth.targetPosition()), static_cast<long>(altitude.targetPosition()),
                       altStepsPerArcmin, azStepsPerArcmin, state, lastFault,
                       static_cast<unsigned>(holdMode), static_cast<unsigned long>(holdDelayMs),
                       azimuth.driverIsEnabled() ? 1U : 0U, altitude.driverIsEnabled() ? 1U : 0U,
                       altDirInvert ? 1U : 0U, azDirInvert ? 1U : 0U,
+                      sensor1.isActive() ? 1U : 0U, sensor2.isActive() ? 1U : 0U,
+                      static_cast<unsigned>(altEndstopSource.load(std::memory_order_acquire)),
+                      static_cast<unsigned>(altEndstopSide.load(std::memory_order_acquire)),
+                      static_cast<unsigned>(azEndstopSource.load(std::memory_order_acquire)),
+                      static_cast<unsigned>(azEndstopSide.load(std::memory_order_acquire)),
                       limitsReady() ? 1U : 0U, static_cast<unsigned long>(Config::CONFIG_SCHEMA_VERSION));
         return;
     }
@@ -759,8 +1069,8 @@ void processCommand(const char *command)
 
     // Identification and read-only mount compatibility.
     if (strcmp(body, "GVP") == 0) { Serial.print("B1-AutoAlign#"); return; }
-    if (strcmp(body, "GVN") == 0) { Serial.print("V0.2.3#"); return; }
-    if (strcmp(body, "GVF") == 0) { Serial.print("B1-AutoAlign V0.2.3#"); return; }
+    if (strcmp(body, "GVN") == 0) { Serial.print("V0.3.0#"); return; }
+    if (strcmp(body, "GVF") == 0) { Serial.print("B1-AutoAlign V0.3.0#"); return; }
     if (strcmp(body, "GVD") == 0) { Serial.print("Nov 2026#"); return; }
     if (strcmp(body, "GVT") == 0) { Serial.print("00:00:00#"); return; }
     if (strcmp(body, "GR") == 0)  { Serial.print("00:00:00#"); return; }
@@ -792,7 +1102,7 @@ void processCommand(const char *command)
     if (strcmp(body, "XGZ") == 0) { Serial.printf("%.1f#", azStepsPerArcmin * 60.0f); return; }
     if (strcmp(body, "XGM") == 0)
     {
-        Serial.print("ESP32,NO_RA,NO_DEC,NO_GPS,AUTO_AZ_ALT,NO_GYRO,NO_LCD,NO_FOC,NO_ENDSW#");
+        Serial.print("ESP32,NO_RA,NO_DEC,NO_GPS,AUTO_AZ_ALT,NO_GYRO,NO_LCD,NO_FOC,ENDSW#");
         return;
     }
     if (strcmp(body, "XGMS") == 0) { Serial.print("PA,1,1|PA,1,1|#"); return; }
@@ -819,7 +1129,7 @@ void processCommand(const char *command)
             setFault("ZERO_CORRECTION");
             return;
         }
-        reportMoveResult(altitude.moveBy(delta, micros(), millis()), false);
+        startRelativeAxisMove(true, delta, false);
         return;
     }
     if (strncmp(body, "MAZ", 3) == 0)
@@ -843,7 +1153,7 @@ void processCommand(const char *command)
             setFault("ZERO_CORRECTION");
             return;
         }
-        reportMoveResult(azimuth.moveBy(delta, micros(), millis()), false);
+        startRelativeAxisMove(false, delta, false);
         return;
     }
     if (strncmp(body, "MXl", 3) == 0)
@@ -862,7 +1172,7 @@ void processCommand(const char *command)
             Serial.print('0');
             return;
         }
-        reportMoveResult(altitude.moveBy(steps, micros(), millis()), true);
+        startRelativeAxisMove(true, steps, true);
         return;
     }
     if (strncmp(body, "MXz", 3) == 0)
@@ -881,7 +1191,7 @@ void processCommand(const char *command)
             Serial.print('0');
             return;
         }
-        reportMoveResult(azimuth.moveBy(steps, micros(), millis()), true);
+        startRelativeAxisMove(false, steps, true);
         return;
     }
 
@@ -908,6 +1218,7 @@ void processCommand(const char *command)
         const uint32_t nowMs = millis();
         azimuth.stopNow(nowMs);
         altitude.stopNow(nowMs);
+        homingAxis.store(static_cast<uint8_t>(HomingAxis::None), std::memory_order_release);
         markPositionDirty();
         persistPositions(true);
         setFault(wasMoving ? "STOPPED" : "NONE");
@@ -1022,6 +1333,24 @@ void setup()
     }
     altDirInvert = preferences.getBool("altInv", Config::DEFAULT_ALT_DIR_INVERT);
     azDirInvert = preferences.getBool("azInv", Config::DEFAULT_AZ_DIR_INVERT);
+    uint8_t storedAltEndstopSource = preferences.getUChar("altEsSrc", 0);
+    uint8_t storedAltEndstopSide = preferences.getUChar("altEsSide", 0);
+    uint8_t storedAzEndstopSource = preferences.getUChar("azEsSrc", 0);
+    uint8_t storedAzEndstopSide = preferences.getUChar("azEsSide", 0);
+    if (storedAltEndstopSource > 2 || storedAltEndstopSide > 1 ||
+        storedAzEndstopSource > 2 || storedAzEndstopSide > 1 ||
+        (storedAltEndstopSource != 0 && storedAltEndstopSource == storedAzEndstopSource))
+    {
+        storedAltEndstopSource = 0;
+        storedAltEndstopSide = 0;
+        storedAzEndstopSource = 0;
+        storedAzEndstopSide = 0;
+        configurationRepaired = true;
+    }
+    altEndstopSource.store(storedAltEndstopSource, std::memory_order_release);
+    altEndstopSide.store(storedAltEndstopSide, std::memory_order_release);
+    azEndstopSource.store(storedAzEndstopSource, std::memory_order_release);
+    azEndstopSide.store(storedAzEndstopSide, std::memory_order_release);
 
     int32_t savedAlt = preferences.getLong("altPos", Config::DEFAULT_ALT_MIN);
     int32_t savedAz = preferences.getLong("azPos", 0);
@@ -1061,6 +1390,8 @@ void setup()
     azimuth.setLimits(azMinEnabled, 0, azMaxEnabled, azMaxPosition);
     altitude.setHoldPolicy(holdMode, holdDelayMs);
     azimuth.setHoldPolicy(holdMode, holdDelayMs);
+    sensor1.begin(millis());
+    sensor2.begin(millis());
 
     if (storedSchema != Config::CONFIG_SCHEMA_VERSION || configurationRepaired)
     {

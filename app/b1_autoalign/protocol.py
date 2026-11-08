@@ -51,6 +51,12 @@ class Snapshot:
     alt_driver_enabled: Optional[bool]
     alt_direction_inverted: Optional[bool]
     az_direction_inverted: Optional[bool]
+    sensor1_active: Optional[bool]
+    sensor2_active: Optional[bool]
+    alt_endstop_source: Optional[int]
+    alt_endstop_side: Optional[int]
+    az_endstop_source: Optional[int]
+    az_endstop_side: Optional[int]
     limits_ready: Optional[bool]
     schema: Optional[int]
 
@@ -224,6 +230,12 @@ class B1AutoAlignClient:
             alt_driver_enabled = fields.get("ALTEN") == "1" if "ALTEN" in fields else None
             alt_direction_inverted = fields.get("ALTINV") == "1" if "ALTINV" in fields else None
             az_direction_inverted = fields.get("AZINV") == "1" if "AZINV" in fields else None
+            sensor1_active = fields.get("ES1") == "1" if "ES1" in fields else None
+            sensor2_active = fields.get("ES2") == "1" if "ES2" in fields else None
+            alt_endstop_source = int(fields["ALTES"]) if "ALTES" in fields else None
+            alt_endstop_side = int(fields["ALTESIDE"]) if "ALTESIDE" in fields else None
+            az_endstop_source = int(fields["AZES"]) if "AZES" in fields else None
+            az_endstop_side = int(fields["AZESIDE"]) if "AZESIDE" in fields else None
             limits_ready = fields.get("LIMITS") == "1" if "LIMITS" in fields else None
             schema = int(fields["SCHEMA"]) if "SCHEMA" in fields else None
         else:
@@ -247,6 +259,12 @@ class B1AutoAlignClient:
             alt_driver_enabled = None
             alt_direction_inverted = None
             az_direction_inverted = None
+            sensor1_active = None
+            sensor2_active = None
+            alt_endstop_source = None
+            alt_endstop_side = None
+            az_endstop_source = None
+            az_endstop_side = None
             limits_ready = None
             schema = None
 
@@ -283,6 +301,12 @@ class B1AutoAlignClient:
             alt_driver_enabled=alt_driver_enabled,
             alt_direction_inverted=alt_direction_inverted,
             az_direction_inverted=az_direction_inverted,
+            sensor1_active=sensor1_active,
+            sensor2_active=sensor2_active,
+            alt_endstop_source=alt_endstop_source,
+            alt_endstop_side=alt_endstop_side,
+            az_endstop_source=az_endstop_source,
+            az_endstop_side=az_endstop_side,
             limits_ready=limits_ready,
             schema=schema,
         )
@@ -373,6 +397,30 @@ class B1AutoAlignClient:
         az_value = 1 if az_inverted else 0
         if self._query_hash(f":PDI{alt_value},{az_value}#") != "1":
             raise ProtocolError("Direction command was rejected; both axes must be idle")
+
+    def set_endstop_configuration(
+        self, alt_source: int, alt_side: int, az_source: int, az_side: int
+    ) -> None:
+        self._require_full_control()
+        if alt_source not in (0, 1, 2) or az_source not in (0, 1, 2):
+            raise ValueError("Endstop source must be disabled, SENSOR1, or SENSOR2")
+        if alt_side not in (0, 1) or az_side not in (0, 1):
+            raise ValueError("Endstop side must be minimum or maximum")
+        if alt_source != 0 and alt_source == az_source:
+            raise ValueError("ALT and AZ cannot use the same sensor input")
+        if self._query_hash(f":PES{alt_source},{alt_side},{az_source},{az_side}#") != "1":
+            raise ProtocolError("Endstop configuration was rejected; both axes must be idle")
+
+    def home_to_endstop(self, axis: str) -> None:
+        self._require_full_control()
+        normalized = axis.upper()
+        if normalized not in ("ALT", "AZ"):
+            raise ValueError("Axis must be ALT or AZ")
+        command = ":PHEA#" if normalized == "ALT" else ":PHEZ#"
+        if self._query_hash(command) != "1":
+            raise ProtocolError(
+                f"{normalized} homing was rejected; check endstop assignment, reference, motion and fault status"
+            )
 
     def release_drivers(self) -> None:
         self._require_full_control()

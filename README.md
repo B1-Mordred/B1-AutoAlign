@@ -8,12 +8,14 @@ The repository also includes a native PyQt6 desktop control center for connectio
 
 The firmware identifies itself as `B1-AutoAlign` over the LX200-compatible serial protocol and is intended to work with the patched INDI `LX200 OpenAstroTech` driver used by Ekos.
 
-> **Development status:** firmware v0.2.3 is flashed and communicating with the
-> connected controller. Timer-driven ALT motion under intensive status polling,
+> **Development status:** firmware v0.3.0 is flashed and communicating with the
+> connected controller. Schema migration preserved the commissioned positions,
+> limits and motor settings; live endstop reporting and no-motion configuration
+> interlocks are validated. Timer-driven ALT motion under intensive status polling,
 > logical reference recovery, persistence across reset, direction polarity and
 > the commissioned soft-limit ranges have been validated. Real angular
-> calibration, thermal/holding behavior and unattended operation under the full
-> telescope load remain unverified.
+> calibration, physical stop-during-motion, homing, thermal/holding behavior and
+> unattended operation under the full telescope load remain unverified.
 
 ## Features
 
@@ -23,6 +25,8 @@ The firmware identifies itself as `B1-AutoAlign` over the LX200-compatible seria
 - microsecond timer-driven STEP scheduling independent of serial polling
 - persistent positions, calibration, ALT/AZ limits, motor directions and holding policy in ESP32 NVS
 - bilateral soft-limit support with an automatic-correction readiness interlock
+- debounced SENSOR1/GPIO39 and SENSOR2/GPIO36 physical endstops with configurable ALT/AZ and min/max assignment
+- motion-into-limit rejection, two-axis emergency stop, escape motion and bounded endstop homing
 - atomic two-axis correction command with bounded magnitude
 - 180-second motion timeout and safe, non-crashing `:Q#` stop command
 - configurable release, timed-hold and always-hold motor policies
@@ -46,7 +50,7 @@ docs/                    build, hardware, protocol, safety and validation notes
 packaging/               desktop launcher templates
 scripts/                 build, check, flash and flash-backup helpers
 tools/                   serial diagnostic client
-tests/                   repository, protocol and executable motion-policy tests
+tests/                   repository, protocol, endstop and executable motion-policy tests
 integrations/indi-1.9.9/ legacy INDI OpenAstroTech PA-control patch
 hardware/                 imported AutoPA printable parts and provenance
 .github/workflows/       continuous-integration build

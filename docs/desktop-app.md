@@ -15,6 +15,9 @@ The B1-AutoAlign Control Center is a native PyQt6 application for Linux. It keep
   sending motor pulses;
 - clear the upper ALT limit;
 - mark and clear the AZ lower/upper soft limits;
+- show live SENSOR1/GPIO39 and SENSOR2/GPIO36 clear/triggered states;
+- assign one physical endstop to each axis and choose its minimum/maximum role;
+- start bounded, guarded ALT or AZ endstop homing;
 - display and persist independent ALT/AZ motor-direction inversion;
 - configure release, timed and continuous motor holding;
 - show correction-limit readiness and live driver-enable state;
@@ -41,6 +44,13 @@ Direction changes are commissioning operations. The app requires confirmation
 that every changed axis is at its physical lower safe boundary. Firmware then
 zeros that changed axis and clears its now-invalid upper limit(s); the safe
 range must be recorded again before automatic correction can become ready.
+
+Physical endstop inputs are disabled after the v0.3.0 migration until explicitly
+assigned. The app prevents assigning one connector to both axes. Homing uses the
+stored configuration—not an uncommitted dropdown edit—and requires confirmation.
+It searches at most 100,000 steps, retains the normal 180-second timeout and can
+be aborted with **STOP BOTH AXES**. A maximum-side switch can only home after its
+upper soft reference has been recorded.
 
 ## Run from the checkout
 

@@ -136,6 +136,15 @@ class SerialWorker(QObject):
                     f"Motor direction stored: ALT {'reversed' if payload['alt_inverted'] else 'normal'}, "
                     f"AZ {'reversed' if payload['az_inverted'] else 'normal'}"
                 )
+            elif kind == "endstop_config":
+                self.client.set_endstop_configuration(
+                    payload["alt_source"], payload["alt_side"],
+                    payload["az_source"], payload["az_side"],
+                )
+                message = "Physical endstop configuration stored"
+            elif kind == "home_endstop":
+                self.client.home_to_endstop(payload["axis"])
+                message = f"{payload['axis']} endstop homing accepted"
             elif kind == "release_drivers":
                 self.client.release_drivers()
                 message = "Both idle motor drivers released"
@@ -204,6 +213,10 @@ class MainWindow(QMainWindow):
         self._automation_ready = False
         self.control_widgets: list[QWidget] = []
         self.axis_position_values: dict[str, QLabel] = {}
+        self._stored_endstop_config: dict[str, tuple[Optional[int], Optional[int]]] = {
+            "ALT": (None, None),
+            "AZ": (None, None),
+        }
 
         self.setWindowTitle("B1-AutoAlign Control Center")
         self.setMinimumSize(980, 680)
@@ -329,6 +342,10 @@ class MainWindow(QMainWindow):
             ("AZ position", "az_position"),
             ("ALT limits", "alt_limits"),
             ("AZ limits", "az_limits"),
+            ("SENSOR1 / GPIO39", "sensor1"),
+            ("SENSOR2 / GPIO36", "sensor2"),
+            ("ALT endstop", "alt_endstop"),
+            ("AZ endstop", "az_endstop"),
             ("Motor direction", "direction"),
             ("Motor holding", "holding"),
             ("Auto limits", "auto_limits"),
@@ -478,6 +495,51 @@ class MainWindow(QMainWindow):
         az_management_layout.addWidget(az_clear_button, 1, 0, 1, 2)
         self.control_widgets.extend([az_bottom_button, az_top_button, az_clear_button])
         setup_root.addWidget(az_management)
+
+        endstops = QGroupBox("Physical endstops — NC switches, active HIGH")
+        endstop_layout = QGridLayout(endstops)
+        self.alt_endstop_source = QComboBox()
+        self.az_endstop_source = QComboBox()
+        for combo in (self.alt_endstop_source, self.az_endstop_source):
+            combo.addItem("Disabled", 0)
+            combo.addItem("SENSOR1 / GPIO39", 1)
+            combo.addItem("SENSOR2 / GPIO36", 2)
+        self.alt_endstop_side = QComboBox()
+        self.az_endstop_side = QComboBox()
+        for combo in (self.alt_endstop_side, self.az_endstop_side):
+            combo.addItem("Minimum / lower", 0)
+            combo.addItem("Maximum / upper", 1)
+        endstop_layout.addWidget(QLabel("Axis"), 0, 0)
+        endstop_layout.addWidget(QLabel("Input"), 0, 1)
+        endstop_layout.addWidget(QLabel("Reference side"), 0, 2)
+        endstop_layout.addWidget(QLabel("Homing"), 0, 3)
+        endstop_layout.addWidget(QLabel("ALT"), 1, 0)
+        endstop_layout.addWidget(self.alt_endstop_source, 1, 1)
+        endstop_layout.addWidget(self.alt_endstop_side, 1, 2)
+        home_alt_button = QPushButton("Home ALT")
+        home_alt_button.clicked.connect(lambda: self._home_to_endstop("ALT"))
+        endstop_layout.addWidget(home_alt_button, 1, 3)
+        endstop_layout.addWidget(QLabel("AZ"), 2, 0)
+        endstop_layout.addWidget(self.az_endstop_source, 2, 1)
+        endstop_layout.addWidget(self.az_endstop_side, 2, 2)
+        home_az_button = QPushButton("Home AZ")
+        home_az_button.clicked.connect(lambda: self._home_to_endstop("AZ"))
+        endstop_layout.addWidget(home_az_button, 2, 3)
+        store_endstops = QPushButton("Store endstop assignment")
+        store_endstops.clicked.connect(self._set_endstop_configuration)
+        endstop_layout.addWidget(store_endstops, 3, 0, 1, 4)
+        endstop_note = QLabel(
+            "Inputs are disabled by default. A triggered switch blocks only motion farther into its configured "
+            "side; escape motion remains available. Homing is limited to 100,000 steps and can be aborted with STOP."
+        )
+        endstop_note.setWordWrap(True)
+        endstop_layout.addWidget(endstop_note, 4, 0, 1, 4)
+        self.control_widgets.extend([
+            self.alt_endstop_source, self.alt_endstop_side,
+            self.az_endstop_source, self.az_endstop_side,
+            home_alt_button, home_az_button, store_endstops,
+        ])
+        setup_root.addWidget(endstops)
 
         calibration = QGroupBox("Steps per arcminute")
         form = QFormLayout(calibration)
@@ -786,7 +848,7 @@ class MainWindow(QMainWindow):
             self.connection_badge.setObjectName("BadgeOn")
             self.connection_badge.setText("B1 CONTROL")
             self.safety_banner.setText(
-                "Full control enabled. Soft limits remain open-loop; support the load during commissioning."
+                "Full control enabled. Loading physical endstop assignment; support the load during commissioning."
             )
             self._log(f"Connected: {data['product']} {data['version']} — full control enabled")
         else:
@@ -844,6 +906,54 @@ class MainWindow(QMainWindow):
         else:
             maximum = "not set" if data["az_max"] is None else f"{data['az_max']:,}"
             self.status_values["az_limits"].setText(f"{data['az_min']:,} … {maximum} steps")
+        if data["sensor1_active"] is None:
+            self.status_values["sensor1"].setText("unavailable on this firmware")
+            self.status_values["sensor2"].setText("unavailable on this firmware")
+        else:
+            self.status_values["sensor1"].setText("TRIGGERED" if data["sensor1_active"] else "clear")
+            self.status_values["sensor2"].setText("TRIGGERED" if data["sensor2_active"] else "clear")
+
+        def endstop_description(source: Optional[int], side: Optional[int]) -> str:
+            if source is None or side is None:
+                return "unavailable"
+            if source == 0:
+                return "disabled"
+            input_names = {1: "SENSOR1 / GPIO39", 2: "SENSOR2 / GPIO36"}
+            active_states = {1: data["sensor1_active"], 2: data["sensor2_active"]}
+            state = "TRIGGERED" if active_states.get(source) else "clear"
+            return f"{input_names.get(source, 'invalid')}, {'minimum' if side == 0 else 'maximum'} — {state}"
+
+        self.status_values["alt_endstop"].setText(
+            endstop_description(data["alt_endstop_source"], data["alt_endstop_side"])
+        )
+        self.status_values["az_endstop"].setText(
+            endstop_description(data["az_endstop_source"], data["az_endstop_side"])
+        )
+        self._stored_endstop_config["ALT"] = (
+            data["alt_endstop_source"], data["alt_endstop_side"]
+        )
+        self._stored_endstop_config["AZ"] = (
+            data["az_endstop_source"], data["az_endstop_side"]
+        )
+        for combo, selected in (
+            (self.alt_endstop_source, data["alt_endstop_source"]),
+            (self.alt_endstop_side, data["alt_endstop_side"]),
+            (self.az_endstop_source, data["az_endstop_source"]),
+            (self.az_endstop_side, data["az_endstop_side"]),
+        ):
+            if selected is not None and not combo.hasFocus():
+                index = combo.findData(selected)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+        if self.full_control and data["alt_endstop_source"] is not None:
+            if data["alt_endstop_source"] and data["az_endstop_source"]:
+                self.safety_banner.setText(
+                    "Physical endstops are armed. Verify each input and min/max assignment before homing under load."
+                )
+            else:
+                self.safety_banner.setText(
+                    "Physical endstops are not fully assigned; motion still relies on open-loop soft limits."
+                )
         if data["alt_direction_inverted"] is None or data["az_direction_inverted"] is None:
             self.status_values["direction"].setText("unavailable")
         else:
@@ -1017,6 +1127,42 @@ class MainWindow(QMainWindow):
                 "alt_inverted": self.alt_direction_inverted.isChecked(),
                 "az_inverted": self.az_direction_inverted.isChecked(),
             })
+
+    def _set_endstop_configuration(self) -> None:
+        alt_source = int(self.alt_endstop_source.currentData())
+        az_source = int(self.az_endstop_source.currentData())
+        if alt_source != 0 and alt_source == az_source:
+            QMessageBox.warning(
+                self, "Duplicate endstop input", "ALT and AZ must use different sensor connectors."
+            )
+            return
+        if self._confirm(
+            "Store physical endstop assignment?",
+            "Confirm the selected GPIO connector and physical minimum/maximum side for each axis. "
+            "An incorrect side assignment defeats hard-limit protection. Both axes must be stationary.",
+        ):
+            self._send_action({
+                "kind": "endstop_config",
+                "alt_source": alt_source,
+                "alt_side": int(self.alt_endstop_side.currentData()),
+                "az_source": az_source,
+                "az_side": int(self.az_endstop_side.currentData()),
+            })
+
+    def _home_to_endstop(self, axis: str) -> None:
+        source, stored_side = self._stored_endstop_config[axis]
+        if source in (None, 0) or stored_side is None:
+            QMessageBox.warning(self, "Endstop disabled", f"Assign and store an {axis} endstop first.")
+            return
+        input_name = "SENSOR1 / GPIO39" if source == 1 else "SENSOR2 / GPIO36"
+        side = "minimum" if stored_side == 0 else "maximum"
+        if self._confirm(
+            f"Home {axis} toward its {side} endstop?",
+            f"The {axis} motor will move toward its stored {input_name} {side} switch for at most 100,000 steps. "
+            "Keep the mechanism in view and use STOP if anything moves in the wrong direction. "
+            "A maximum-side endstop requires a stored upper soft-limit reference.",
+        ):
+            self._send_action({"kind": "home_endstop", "axis": axis})
 
     def _set_calibration(self, axis: str, value: float) -> None:
         self._send_action({"kind": "calibration", "axis": axis, "value": value})

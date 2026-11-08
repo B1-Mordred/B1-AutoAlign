@@ -31,7 +31,7 @@ class FirmwareContractTests(unittest.TestCase):
 
     def test_product_identity(self):
         self.assertIn('Serial.print("B1-AutoAlign#")', self.source)
-        self.assertIn('Serial.print("B1-AutoAlign V0.2.3#")', self.source)
+        self.assertIn('Serial.print("B1-AutoAlign V0.3.0#")', self.source)
 
     def test_oae_v1_pin_contract(self):
         expected = {
@@ -41,6 +41,8 @@ class FirmwareContractTests(unittest.TestCase):
             "AZ_STEP_PIN": 18,
             "AZ_DIR_PIN": 19,
             "AZ_EN_PIN": 32,
+            "SENSOR1_PIN": 39,
+            "SENSOR2_PIN": 36,
         }
         for name, pin in expected.items():
             self.assertRegex(self.source, rf"constexpr uint8_t {name}\s*=\s*{pin};")
@@ -70,7 +72,7 @@ class FirmwareContractTests(unittest.TestCase):
         self.assertIn("startAtomicRelativeMove", self.source)
         self.assertIn("MAX_ALT_COMMAND_ARCMIN", self.source)
         self.assertIn("MAX_AZ_COMMAND_ARCMIN", self.source)
-        self.assertIn("CONFIG_SCHEMA_VERSION = 3", self.source)
+        self.assertIn("CONFIG_SCHEMA_VERSION = 4", self.source)
         self.assertIn("ServiceResult::TimedOut", header)
         self.assertIn("HoldMode::Always", header)
         self.assertIn('strcmp(body, "PAU") == 0', self.source)
@@ -90,6 +92,19 @@ class FirmwareContractTests(unittest.TestCase):
     def test_project_namespace(self):
         self.assertIn('preferences.begin("b1autoalign", false)', self.source)
 
+    def test_physical_endstop_safety_contract(self):
+        endstop_header = (SOURCE.parent / "EndstopInput.h").read_text(encoding="utf-8")
+        motion_header = (SOURCE.parent / "MotionAxis.h").read_text(encoding="utf-8")
+        self.assertIn("ENDSTOP_DEBOUNCE_MS", self.source)
+        self.assertIn("MotionAltEndstop", self.source)
+        self.assertIn("MotionAzEndstop", self.source)
+        self.assertIn('strncmp(body, "PES", 3) == 0', self.source)
+        self.assertIn('strcmp(body, "PHEA") == 0', self.source)
+        self.assertIn('strcmp(body, "PHEZ") == 0', self.source)
+        self.assertIn("endstopBlocksDirection", endstop_header)
+        self.assertIn("startHomingMove", motion_header)
+        self.assertNotIn("NO_ENDSW", self.source)
+
 
 class RepositoryTests(unittest.TestCase):
     def test_release_versions_are_consistent(self):
@@ -97,9 +112,9 @@ class RepositoryTests(unittest.TestCase):
         package_init = (ROOT / "app" / "b1_autoalign" / "__init__.py").read_text(encoding="utf-8")
         version = re.search(r'^version\s*=\s*"([^"]+)"', project, re.MULTILINE)
         self.assertIsNotNone(version)
-        self.assertEqual(version.group(1), "0.2.3")
-        self.assertIn('__version__ = "0.2.3"', package_init)
-        self.assertIn('Serial.print("B1-AutoAlign V0.2.3#")', SOURCE.read_text(encoding="utf-8"))
+        self.assertEqual(version.group(1), "0.3.0")
+        self.assertIn('__version__ = "0.3.0"', package_init)
+        self.assertIn('Serial.print("B1-AutoAlign V0.3.0#")', SOURCE.read_text(encoding="utf-8"))
 
     def test_autopa_model_set_and_checksums(self):
         model_dir = AUTOPA_MODELS / "STL"

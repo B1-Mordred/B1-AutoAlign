@@ -14,5 +14,11 @@ g++ -std=c++17 -Wall -Wextra -Werror \
     "$repo_dir/tests/firmware_host/test_motion_axis.cpp" \
     -o "$b1_config_dir/test_motion_axis"
 "$b1_config_dir/test_motion_axis"
+g++ -std=c++17 -Wall -Wextra -Werror \
+    -I "$repo_dir/tests/firmware_host" \
+    -I "$repo_dir/firmware/B1-AutoAlign" \
+    "$repo_dir/tests/firmware_host/test_endstop_input.cpp" \
+    -o "$b1_config_dir/test_endstop_input"
+"$b1_config_dir/test_endstop_input"
 QT_QPA_PLATFORM=offscreen XDG_CONFIG_HOME="$b1_config_dir" "$repo_dir/scripts/run-app.sh" --smoke-test
 "$repo_dir/scripts/build.sh"

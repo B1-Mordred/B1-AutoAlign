@@ -2,6 +2,25 @@
 
 All notable changes to B1-AutoAlign will be documented here.
 
+## 0.3.0 - 2026-11-08
+
+- Added debounced active-high physical endstop inputs on OpenAstroExplorer
+  SENSOR1/GPIO39 and SENSOR2/GPIO36.
+- Added persistent, independently assignable ALT/AZ input and minimum/maximum
+  roles; duplicate input assignments are rejected.
+- Reject motion farther into an active endstop, allow escape motion, and stop
+  both axes if an assigned endstop triggers during movement.
+- Reference the logical coordinate when a configured endstop is reached and
+  persist the resulting position immediately.
+- Added bounded 100,000-step endstop homing with normal timeout and STOP abort;
+  maximum-side homing requires an existing stored upper reference.
+- Added live input/configuration fields to `PGL`, endstop configuration and
+  homing protocol commands, and an `ENDSW` capability report.
+- Added desktop input/side assignment, live clear/triggered status, guarded
+  homing controls, and endstop-aware safety messaging.
+- Added executable debounce, timer-wrap, direction-policy and bounded-homing
+  host tests. Configuration schema is now 4.
+
 ## 0.2.3 - 2026-11-08
 
 - Added a guarded command and desktop action to confirm that the stationary

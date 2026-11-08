@@ -142,6 +142,24 @@ class StepDirAxis
         return result;
     }
 
+    MoveResult startHomingMove(int8_t direction, int32_t maximumSteps, uint32_t nowUs, uint32_t nowMs)
+    {
+        AxisLockGuard guard(mutex);
+        if (isMovingUnlocked())
+            return MoveResult::Busy;
+        if ((direction != -1 && direction != 1) || maximumSteps <= 0)
+            return MoveResult::Range;
+        const int64_t requested = static_cast<int64_t>(current) +
+                                  static_cast<int64_t>(direction) * maximumSteps;
+        if (requested < INT32_MIN || requested > INT32_MAX)
+            return MoveResult::Range;
+        // Homing deliberately crosses a possibly stale soft limit. The
+        // physical endstop, bounded search distance and normal motion timeout
+        // remain active throughout the move.
+        startValidatedMoveUnlocked(static_cast<int32_t>(requested), nowUs, nowMs);
+        return MoveResult::Accepted;
+    }
+
     void stopNow(uint32_t nowMs)
     {
         AxisLockGuard guard(mutex);
@@ -277,6 +295,11 @@ class StepDirAxis
     {
         AxisLockGuard guard(mutex);
         return invertDir;
+    }
+    int8_t directionOfMotion() const
+    {
+        AxisLockGuard guard(mutex);
+        return target > current ? 1 : (target < current ? -1 : 0);
     }
     const char *axisName() const { return name; }
 

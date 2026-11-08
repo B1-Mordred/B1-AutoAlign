@@ -24,6 +24,40 @@ B1-AutoAlign currently targets an ESP32 using the OpenAstroExplorer board v1 pin
 
 ENABLE is assumed to be active-low, as with common A4988-compatible stepper interfaces.
 
+## Physical endstop inputs
+
+The official board's two three-pin sensor connectors are available to firmware
+v0.3.0 as active-high inputs:
+
+| Connector | Schematic pin 1 | Pin 2 | Pin 3 |
+|---|---|---|---|
+| SENSOR1 | 5 V | GPIO39 | GND |
+| SENSOR2 | 5 V | GPIO36 | GND |
+
+GPIO36 and GPIO39 are 3.3 V input-only pins without internal pull resistors.
+Never connect the connector's 5 V pin directly to the GPIO signal. For the
+tested normally-closed mechanical switch and only 10 kΩ resistors, wire each
+connector as follows:
+
+```text
+5 V ── 10 kΩ ── GPIO / switch NC
+                   |
+                 10 kΩ
+                   |
+                 10 kΩ
+                   |
+GND ───────────────┴── switch C
+```
+
+The two lower resistors are in series. They form a 10 kΩ/20 kΩ divider that
+produces approximately 3.33 V when the NC contact opens. With the switch
+released, NC-C holds the input low. `NO` remains unconnected. Identify 5 V and
+GND electrically rather than assuming a left-to-right connector orientation.
+
+Firmware always reports both debounced input states. Their axis and physical
+minimum/maximum roles are disabled by default and must be stored from the
+desktop app or `PES` command after the switches are securely mounted.
+
 ## Direction
 
 A positive ALT command must move the base upward and away from its lower
@@ -79,4 +113,12 @@ The default is a software precaution, not proof that the axes can safely hold 25
 
 ALT always has a logical lower limit at zero and supports a recorded upper limit. AZ v0.2.0 supports a recorded lower/zero reference and upper limit. Automatic correction commands remain locked until all four logical boundaries are present.
 
-These are open-loop soft limits. Physical limit switches or absolute encoders remain strongly recommended for eventual unattended operation.
+Firmware v0.3.0 adds one physical endstop per axis while retaining the bilateral
+soft limits. An active assigned endstop blocks motion farther into its configured
+side, but permits motion away from it. If an assigned switch triggers during
+motion, firmware stops both axes. Reaching a minimum endstop establishes zero;
+reaching a maximum endstop restores the previously recorded upper coordinate.
+
+Endstops reduce travel-overrun risk but do not detect stalls, missed steps,
+coupler slip or unsafe motion in the opposite direction. One switch per axis is
+not bilateral physical protection, and it does not make unattended operation safe.

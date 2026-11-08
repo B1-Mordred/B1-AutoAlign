@@ -30,6 +30,26 @@ The polar-alignment base carries a mechanically significant telescope assembly. 
 13. Record a new upper ALT soft limit only after the full safe travel is established.
 14. Confirm that status reports `LIMITS=1` before testing an atomic correction.
 
+## Physical endstop commissioning
+
+1. Leave both endstop assignments disabled while mounting the switches.
+2. In the desktop status panel, press each switch by hand and verify that only
+   its expected SENSOR1/GPIO39 or SENSOR2/GPIO36 indicator becomes `TRIGGERED`.
+3. Verify the signal is approximately 0 V released and no more than about
+   3.3 V triggered. A logic-state test alone cannot detect an unsafe 5 V input.
+4. Mount each switch so it opens before the mechanism reaches a damaging hard stop.
+5. Store the correct axis, connector and minimum/maximum side assignment while
+   both axes are stationary.
+6. With the load independently supported, trigger the switch by hand and send a
+   tiny command farther into the configured side. It must be rejected without a step.
+7. Confirm a tiny command away from the switch is allowed, then release it.
+8. Start homing only with the mechanism in view and a hardware power disconnect
+   within reach. Use STOP immediately if the configured direction is wrong.
+
+The normally-closed wiring is fail-safe for an open switch cable: the input
+appears triggered. Firmware deliberately permits escape motion away from the
+configured boundary even while the input remains active.
+
 ## Motor holding
 
 Version 0.2.0 defaults to continuous holding after motion and after STOP. This is intended to reduce sudden back-driving, but holding current can overheat a motor or driver. Support the telescope independently while testing temperature and current limits.
@@ -38,7 +58,7 @@ Version 0.2.0 defaults to continuous holding after motion and after STOP. This i
 
 ## Boundaries
 
-Soft limits depend on the saved open-loop position. They are invalid after lost steps, a slipped coupling, manual movement or a restored flash image with different coordinates. Use mechanical protection appropriate to the load.
+Soft limits depend on the saved open-loop position. They are invalid after lost steps, a slipped coupling, manual movement or a restored flash image with different coordinates. A single endstop per axis re-establishes one coordinate but does not protect the opposite physical boundary. Use mechanical protection appropriate to the load.
 
 The firmware rejects oversized commands and stops both axes if either exceeds the 180-second motion timeout. These guards do not detect a stalled motor or prove that the mechanism actually moved.
 

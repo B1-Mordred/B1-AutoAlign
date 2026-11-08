@@ -104,6 +104,21 @@ static void testNextStepDeadline()
     assert(axis.microsecondsUntilStep(26000) > 0);
 }
 
+static void testBoundedHomingCrossesStaleSoftLimit()
+{
+    auto axis = makeAxis();
+    axis.begin(50);
+    axis.setLimits(true, 0, true, 100);
+    assert(axis.startHomingMove(-1, 100, 0, 0) == MoveResult::Accepted);
+    assert(axis.targetPosition() == -50);
+    assert(axis.directionOfMotion() == -1);
+    axis.stopNow(0);
+    assert(axis.directionOfMotion() == 0);
+
+    axis.setCurrentPosition(INT32_MAX - 10);
+    assert(axis.startHomingMove(1, 100, 0, 0) == MoveResult::Range);
+}
+
 int main()
 {
     testLimitsAndOverflow();
@@ -112,5 +127,6 @@ int main()
     testRuntimeDirectionInversion();
     testTimeoutAcrossMillisWrap();
     testNextStepDeadline();
+    testBoundedHomingCrossesStaleSoftLimit();
     return 0;
 }
