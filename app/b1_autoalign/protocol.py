@@ -115,6 +115,14 @@ class B1AutoAlignClient:
                 time.sleep(self._startup_delay)
             self._reset_input()
             product = self._query_hash(":GVP#")
+            if product.startswith(("Parked,", "AZ=")) or (
+                SUPPORTED_PRODUCT in product and product != SUPPORTED_PRODUCT
+            ):
+                # A previous process can be terminated after writing a status
+                # query but before consuming its reply. Discard that delayed
+                # response and perform one clean identity query.
+                self._reset_input()
+                product = self._query_hash(":GVP#")
             version = self._query_hash(":GVN#")
             self.identity = Identity(
                 product=product,
@@ -191,7 +199,13 @@ class B1AutoAlignClient:
             raise ProtocolError("Controller identity is unavailable")
 
         if identity.full_control:
-            fields = parse_pgl(self._query_hash(":PGL#"))
+            try:
+                fields = parse_pgl(self._query_hash(":PGL#"))
+            except ProtocolError:
+                # Recover once from a stale partial status reply left by a
+                # previously interrupted desktop/INDI connection.
+                self._reset_input()
+                fields = parse_pgl(self._query_hash(":PGL#"))
             alt_max = None if fields["ALTMAX"] == "NA" else int(fields["ALTMAX"])
             az_min = None if fields.get("AZMIN", "NA") == "NA" else int(fields["AZMIN"])
             az_max = None if fields.get("AZMAX", "NA") == "NA" else int(fields["AZMAX"])

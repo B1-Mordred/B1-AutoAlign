@@ -130,6 +130,30 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(snapshot.state, "IDLE")
         self.assertEqual(fake.commands.count(":PGL#"), 2)
 
+    def test_connection_resynchronizes_after_stale_status_reply(self):
+        client, fake = client_with({
+            ":GVP#": [b"Parked,------,0,0#", b"B1-AutoAlign#"],
+            ":GVN#": [b"V0.2.3#"],
+        })
+        identity = client.connect("fake")
+        self.assertTrue(identity.full_control)
+        self.assertEqual(fake.commands.count(":GVP#"), 2)
+
+    def test_snapshot_retries_one_malformed_pgl_reply(self):
+        valid = (
+            b"AZ=0,ALT=59900,AZMIN=0,AZMAX=NA,ALTMIN=0,ALTMAX=62000,"
+            b"AZTARGET=0,ALTTARGET=59900,ACAL=100.0,ZCAL=11.0,STATE=IDLE,FAULT=NONE#"
+        )
+        client, fake = client_with({
+            ":GVP#": [b"B1-AutoAlign#"],
+            ":GVN#": [b"V0.2.3#"],
+            ":PGL#": [b"AZ=0,ALT=59900#", valid],
+            ":GX#": [b"Parked,------,0,0#"],
+        })
+        client.connect("fake")
+        self.assertEqual(client.snapshot().alt_steps, 59900)
+        self.assertEqual(fake.commands.count(":PGL#"), 2)
+
     def test_rejected_limit_command_raises(self):
         client, _fake = client_with({
             ":GVP#": [b"B1-AutoAlign#"],

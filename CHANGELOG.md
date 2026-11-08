@@ -11,6 +11,8 @@ All notable changes to B1-AutoAlign will be documented here.
   previous 1.5-second power-loss window before the final position was saved.
 - Refresh a desktop status snapshot once when motion completes between the
   separate position and motion-state queries, avoiding a stale final readout.
+- Resynchronize once when reconnecting after a previous process was interrupted
+  with a status reply still in flight.
 
 ## 0.2.2 - 2026-11-08
 
