@@ -183,6 +183,9 @@ class B1AutoAlignClient:
         self._write(command)
 
     def snapshot(self) -> Snapshot:
+        return self._snapshot(allow_completion_refresh=True)
+
+    def _snapshot(self, allow_completion_refresh: bool) -> Snapshot:
         identity = self.identity
         if identity is None:
             raise ProtocolError("Controller identity is unavailable")
@@ -234,6 +237,17 @@ class B1AutoAlignClient:
             schema = None
 
         moving_az, moving_alt = parse_motion(self._query_hash(":GX#"))
+        if (
+            allow_completion_refresh
+            and identity.full_control
+            and state != "IDLE"
+            and not moving_az
+            and not moving_alt
+        ):
+            # PGL and GX are separate serial queries. A move can finish between
+            # them, leaving positions from the last moving instant paired with
+            # an idle motion flag. Refresh once to return one settled snapshot.
+            return self._snapshot(allow_completion_refresh=False)
         return Snapshot(
             az_steps=az_steps,
             alt_steps=alt_steps,
@@ -299,6 +313,11 @@ class B1AutoAlignClient:
         self._require_full_control()
         if self._query_hash(":PAT#") != "1":
             raise ProtocolError("ALT top command was rejected")
+
+    def restore_alt_top_reference(self) -> None:
+        self._require_full_control()
+        if self._query_hash(":PAU#") != "1":
+            raise ProtocolError("Stored ALT top reference is unavailable or the axis is moving")
 
     def clear_alt_top(self) -> None:
         self._require_full_control()

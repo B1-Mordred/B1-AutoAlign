@@ -91,6 +91,19 @@ static void testTimeoutAcrossMillisWrap()
     assert(axis.driverIsEnabled());
 }
 
+static void testNextStepDeadline()
+{
+    auto axis = makeAxis();
+    axis.begin(0);
+    assert(axis.microsecondsUntilStep(1234) == UINT32_MAX);
+    assert(axis.moveBy(10, 1000, 0) == MoveResult::Accepted);
+    assert(axis.microsecondsUntilStep(1000) == 25000);
+    assert(axis.microsecondsUntilStep(11000) == 15000);
+    assert(axis.microsecondsUntilStep(26000) == 0);
+    assert(axis.service(26000, 26) == ServiceResult::Stepped);
+    assert(axis.microsecondsUntilStep(26000) > 0);
+}
+
 int main()
 {
     testLimitsAndOverflow();
@@ -98,5 +111,6 @@ int main()
     testStopKeepsLoadHeld();
     testRuntimeDirectionInversion();
     testTimeoutAcrossMillisWrap();
+    testNextStepDeadline();
     return 0;
 }

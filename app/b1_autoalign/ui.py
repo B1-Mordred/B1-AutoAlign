@@ -109,6 +109,9 @@ class SerialWorker(QObject):
             elif kind == "mark_top":
                 self.client.mark_alt_top()
                 message = "Current ALT position stored as upper limit"
+            elif kind == "restore_top":
+                self.client.restore_alt_top_reference()
+                message = "Current physical ALT position set to the stored upper reference"
             elif kind == "clear_top":
                 self.client.clear_alt_top()
                 message = "ALT upper limit cleared"
@@ -445,16 +448,21 @@ class MainWindow(QMainWindow):
         zero_button = QPushButton("Zero both counters")
         bottom_button = QPushButton("Mark current ALT as bottom")
         top_button = QPushButton("Mark current ALT as top")
+        restore_top_button = QPushButton("Current ALT is at stored top")
         clear_button = QPushButton("Clear ALT top limit")
         zero_button.clicked.connect(self._zero_both)
         bottom_button.clicked.connect(self._mark_bottom)
         top_button.clicked.connect(self._mark_top)
+        restore_top_button.clicked.connect(self._restore_top)
         clear_button.clicked.connect(self._clear_top)
         management_layout.addWidget(zero_button, 0, 0)
         management_layout.addWidget(bottom_button, 0, 1)
         management_layout.addWidget(top_button, 1, 0)
         management_layout.addWidget(clear_button, 1, 1)
-        self.control_widgets.extend([zero_button, bottom_button, top_button, clear_button])
+        management_layout.addWidget(restore_top_button, 2, 0, 1, 2)
+        self.control_widgets.extend(
+            [zero_button, bottom_button, top_button, clear_button, restore_top_button]
+        )
         setup_root.addWidget(management)
 
         az_management = QGroupBox("AZ reference and limits")
@@ -950,6 +958,14 @@ class MainWindow(QMainWindow):
             "The current positive ALT position will become the upper soft limit.",
         ):
             self._send_action({"kind": "mark_top"})
+
+    def _restore_top(self) -> None:
+        if self._confirm(
+            "Restore stored ALT top reference?",
+            "Confirm that ALT is physically at its upper stop. This sends no motor pulses; "
+            "it sets the logical position to the already stored upper limit.",
+        ):
+            self._send_action({"kind": "restore_top"})
 
     def _clear_top(self) -> None:
         if self._confirm(

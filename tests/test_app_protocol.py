@@ -109,6 +109,27 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(UnsupportedFirmwareError):
             client.stop()
 
+    def test_snapshot_refreshes_if_move_finishes_between_queries(self):
+        moving = (
+            b"AZ=0,ALT=61002,AZMIN=NA,AZMAX=NA,ALTMIN=0,ALTMAX=62000,"
+            b"AZTARGET=0,ALTTARGET=61000,ACAL=100.0,ZCAL=11.0,STATE=ALT,FAULT=NONE#"
+        )
+        settled = (
+            b"AZ=0,ALT=61000,AZMIN=NA,AZMAX=NA,ALTMIN=0,ALTMAX=62000,"
+            b"AZTARGET=0,ALTTARGET=61000,ACAL=100.0,ZCAL=11.0,STATE=IDLE,FAULT=NONE#"
+        )
+        client, fake = client_with({
+            ":GVP#": [b"B1-AutoAlign#"],
+            ":GVN#": [b"V0.2.3#"],
+            ":PGL#": [moving, settled],
+            ":GX#": [b"Parked,------,0,0#", b"Parked,------,0,0#"],
+        })
+        client.connect("fake")
+        snapshot = client.snapshot()
+        self.assertEqual(snapshot.alt_steps, 61000)
+        self.assertEqual(snapshot.state, "IDLE")
+        self.assertEqual(fake.commands.count(":PGL#"), 2)
+
     def test_rejected_limit_command_raises(self):
         client, _fake = client_with({
             ":GVP#": [b"B1-AutoAlign#"],
@@ -128,6 +149,7 @@ class ClientTests(unittest.TestCase):
             ":PHM2#": [b"1#"],
             ":PHD5000#": [b"1#"],
             ":PDI1,0#": [b"1#"],
+            ":PAU#": [b"1#"],
             ":PAC0.250000,-0.125000#": [b"1#"],
         })
         client.connect("fake")
@@ -136,10 +158,12 @@ class ClientTests(unittest.TestCase):
         client.set_hold_mode(2)
         client.set_hold_delay(5000)
         client.set_direction_inversion(True, False)
+        client.restore_alt_top_reference()
         client.move_correction_degrees(0.25, -0.125)
         self.assertIn(":PZB#", fake.commands)
         self.assertIn(":PZT#", fake.commands)
         self.assertIn(":PDI1,0#", fake.commands)
+        self.assertIn(":PAU#", fake.commands)
         self.assertIn(":PAC0.250000,-0.125000#", fake.commands)
 
 

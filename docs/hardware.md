@@ -57,6 +57,12 @@ These reproduce the observed command-to-counter conversion of the previous firmw
 
 Both axes are open-loop. The firmware cannot detect a stalled motor, lost steps, a slipping coupling or manual motion while powered off. The saved counter is therefore not a substitute for mechanical stops, limit switches or a reference procedure.
 
+Firmware v0.2.2 schedules STEP pulses from the ESP32's high-priority
+microsecond timer task. Serial status responses, desktop polling and INDI
+traffic therefore no longer determine the interval between motor steps. Axis
+state access is synchronized between the timer and command tasks. The serial
+port also uses a transmit buffer large enough for the expanded status packet.
+
 The 25 kg total system mass is a mechanical design and motor/driver requirement; compiling or operating this firmware does not validate that load capacity.
 
 ## Holding policy

@@ -31,7 +31,7 @@ class FirmwareContractTests(unittest.TestCase):
 
     def test_product_identity(self):
         self.assertIn('Serial.print("B1-AutoAlign#")', self.source)
-        self.assertIn('Serial.print("B1-AutoAlign V0.2.1#")', self.source)
+        self.assertIn('Serial.print("B1-AutoAlign V0.2.3#")', self.source)
 
     def test_oae_v1_pin_contract(self):
         expected = {
@@ -73,6 +73,19 @@ class FirmwareContractTests(unittest.TestCase):
         self.assertIn("CONFIG_SCHEMA_VERSION = 3", self.source)
         self.assertIn("ServiceResult::TimedOut", header)
         self.assertIn("HoldMode::Always", header)
+        self.assertIn('strcmp(body, "PAU") == 0', self.source)
+        self.assertIn("MotionCompleted", self.source)
+
+    def test_motion_timing_is_independent_of_serial_polling(self):
+        header = (SOURCE.parent / "MotionAxis.h").read_text(encoding="utf-8")
+        loop_body = self.source.split("void loop()", 1)[1]
+        self.assertIn("ESP_TIMER_TASK", self.source)
+        self.assertIn("esp_timer_restart(motionTimer, nextServiceUs)", self.source)
+        self.assertIn("Serial.setTxBufferSize(Config::SERIAL_TX_BUFFER_BYTES)", self.source)
+        self.assertIn("microsecondsUntilStep", header)
+        self.assertIn("AxisLockGuard", header)
+        self.assertNotIn("altitude.service(", loop_body)
+        self.assertNotIn("azimuth.service(", loop_body)
 
     def test_project_namespace(self):
         self.assertIn('preferences.begin("b1autoalign", false)', self.source)

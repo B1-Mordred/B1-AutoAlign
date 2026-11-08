@@ -11,6 +11,8 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include <atomic>
+#include <esp_timer.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -21,6 +23,9 @@
 namespace Config
 {
 constexpr uint32_t SERIAL_BAUD = 19200;
+constexpr size_t SERIAL_TX_BUFFER_BYTES = 512;
+constexpr uint64_t MOTION_IDLE_SERVICE_US = 1000;
+constexpr uint64_t MOTION_MIN_SERVICE_US = 50;
 
 // Official OpenAstroExplorer board v1 pin map.
 constexpr uint8_t ALT_STEP_PIN = 13;
@@ -96,6 +101,19 @@ char commandBuffer[96];
 size_t commandLength = 0;
 bool receivingCommand = false;
 
+enum MotionEvent : uint32_t
+{
+    MotionPositionChanged = 1U << 0,
+    MotionAltTimedOut = 1U << 1,
+    MotionAzTimedOut = 1U << 2,
+    MotionTimerFailed = 1U << 3,
+    MotionCompleted = 1U << 4,
+};
+
+esp_timer_handle_t motionTimer = nullptr;
+std::atomic<uint32_t> pendingMotionEvents{0};
+std::atomic<bool> motionTimerReady{false};
+
 void setFault(const char *fault)
 {
     strncpy(lastFault, fault, sizeof(lastFault) - 1);
@@ -108,7 +126,104 @@ void markPositionDirty()
     lastPositionChangeMs = millis();
 }
 
-void persistPositions(bool force = false)
+void persistPositions(bool force);
+
+void serviceMotionTimer(void *)
+{
+    const uint32_t nowUs = micros();
+    const uint32_t nowMs = millis();
+    const ServiceResult altResult = altitude.service(nowUs, nowMs);
+    const ServiceResult azResult = azimuth.service(nowUs, nowMs);
+
+    uint32_t events = 0;
+    if (altResult == ServiceResult::Stepped || altResult == ServiceResult::Completed ||
+        altResult == ServiceResult::TimedOut || azResult == ServiceResult::Stepped ||
+        azResult == ServiceResult::Completed || azResult == ServiceResult::TimedOut)
+        events |= MotionPositionChanged;
+    if (altResult == ServiceResult::Completed || azResult == ServiceResult::Completed)
+        events |= MotionCompleted;
+
+    if (altResult == ServiceResult::TimedOut || azResult == ServiceResult::TimedOut)
+    {
+        altitude.stopNow(nowMs);
+        azimuth.stopNow(nowMs);
+        events |= altResult == ServiceResult::TimedOut ? MotionAltTimedOut : MotionAzTimedOut;
+    }
+
+    const uint32_t deadlineUs = micros();
+    const uint32_t altWaitUs = altitude.microsecondsUntilStep(deadlineUs);
+    const uint32_t azWaitUs = azimuth.microsecondsUntilStep(deadlineUs);
+    uint64_t nextServiceUs = Config::MOTION_IDLE_SERVICE_US;
+    if (altWaitUs != UINT32_MAX || azWaitUs != UINT32_MAX)
+    {
+        if (altWaitUs == UINT32_MAX)
+            nextServiceUs = azWaitUs;
+        else if (azWaitUs == UINT32_MAX)
+            nextServiceUs = altWaitUs;
+        else
+            nextServiceUs = altWaitUs < azWaitUs ? altWaitUs : azWaitUs;
+        if (nextServiceUs < Config::MOTION_MIN_SERVICE_US)
+            nextServiceUs = Config::MOTION_MIN_SERVICE_US;
+    }
+
+    if (esp_timer_restart(motionTimer, nextServiceUs) != ESP_OK)
+    {
+        altitude.stopNow(nowMs);
+        azimuth.stopNow(nowMs);
+        motionTimerReady.store(false, std::memory_order_release);
+        events |= MotionPositionChanged | MotionTimerFailed;
+    }
+    if (events != 0)
+        pendingMotionEvents.fetch_or(events, std::memory_order_release);
+}
+
+bool startMotionTimer()
+{
+    const esp_timer_create_args_t timerConfig = {
+        .callback = serviceMotionTimer,
+        .arg = nullptr,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "b1_motion",
+        .skip_unhandled_events = true,
+    };
+    if (esp_timer_create(&timerConfig, &motionTimer) != ESP_OK)
+        return false;
+    if (esp_timer_start_periodic(motionTimer, Config::MOTION_IDLE_SERVICE_US) != ESP_OK)
+    {
+        esp_timer_delete(motionTimer);
+        motionTimer = nullptr;
+        return false;
+    }
+    motionTimerReady.store(true, std::memory_order_release);
+    return true;
+}
+
+void consumeMotionEvents()
+{
+    const uint32_t events = pendingMotionEvents.exchange(0, std::memory_order_acq_rel);
+    if ((events & MotionPositionChanged) != 0)
+        markPositionDirty();
+    if ((events & MotionTimerFailed) != 0)
+        setFault("MOTION_TIMER");
+    else if ((events & MotionAltTimedOut) != 0)
+        setFault("ALT_TIMEOUT");
+    else if ((events & MotionAzTimedOut) != 0)
+        setFault("AZ_TIMEOUT");
+    if ((events & MotionCompleted) != 0 && !altitude.isMoving() && !azimuth.isMoving())
+        persistPositions(true);
+}
+
+bool motionAvailable(bool reply)
+{
+    if (motionTimerReady.load(std::memory_order_acquire))
+        return true;
+    setFault("MOTION_TIMER");
+    if (reply)
+        Serial.print('0');
+    return false;
+}
+
+void persistPositions(bool force)
 {
     if (!positionDirty && !force)
         return;
@@ -240,6 +355,8 @@ bool arcminutesToSteps(float arcminutes, float calibration, int32_t &steps)
 
 bool startAtomicRelativeMove(int32_t azDelta, int32_t altDelta)
 {
+    if (!motionAvailable(false))
+        return false;
     if (azDelta == 0 && altDelta == 0)
     {
         setFault("ZERO_CORRECTION");
@@ -271,6 +388,8 @@ bool startAtomicRelativeMove(int32_t azDelta, int32_t altDelta)
 
 bool startAtomicAbsoluteMove(int32_t azTarget, int32_t altTarget)
 {
+    if (!motionAvailable(false))
+        return false;
     const MoveResult azResult = azimuth.validateTarget(azTarget);
     const MoveResult altResult = altitude.validateTarget(altTarget);
     if (azResult != MoveResult::Accepted)
@@ -332,6 +451,22 @@ void handlePaExtension(const char *body)
         altMaxEnabled = true;
         altitude.setLimits(true, 0, true, altMaxPosition);
         persistConfiguration();
+        setFault("NONE");
+        Serial.print("1#");
+        return;
+    }
+    if (strcmp(body, "PAU") == 0)  // Confirm current physical ALT is at the stored upper reference.
+    {
+        if (altitude.isMoving() || !altMaxEnabled || altMaxPosition <= Config::DEFAULT_ALT_MIN)
+        {
+            setFault(altitude.isMoving() ? "BUSY" : "ALT_MAX_UNSET");
+            Serial.print("0#");
+            return;
+        }
+        altitude.setCurrentPosition(altMaxPosition);
+        altitude.setLimits(true, Config::DEFAULT_ALT_MIN, true, altMaxPosition);
+        markPositionDirty();
+        persistPositions(true);
         setFault("NONE");
         Serial.print("1#");
         return;
@@ -624,8 +759,8 @@ void processCommand(const char *command)
 
     // Identification and read-only mount compatibility.
     if (strcmp(body, "GVP") == 0) { Serial.print("B1-AutoAlign#"); return; }
-    if (strcmp(body, "GVN") == 0) { Serial.print("V0.2.1#"); return; }
-    if (strcmp(body, "GVF") == 0) { Serial.print("B1-AutoAlign V0.2.1#"); return; }
+    if (strcmp(body, "GVN") == 0) { Serial.print("V0.2.3#"); return; }
+    if (strcmp(body, "GVF") == 0) { Serial.print("B1-AutoAlign V0.2.3#"); return; }
     if (strcmp(body, "GVD") == 0) { Serial.print("Nov 2026#"); return; }
     if (strcmp(body, "GVT") == 0) { Serial.print("00:00:00#"); return; }
     if (strcmp(body, "GR") == 0)  { Serial.print("00:00:00#"); return; }
@@ -665,6 +800,7 @@ void processCommand(const char *command)
     // Relative PA movement.  The official MAL/MAZ commands are silent.
     if (strncmp(body, "MAL", 3) == 0)
     {
+        if (!motionAvailable(false)) return;
         float arcmin;
         if (!parseFloatStrict(body + 3, arcmin)) { setFault("BAD_ALT_CMD"); return; }
         if (arcmin == 0.0f || fabsf(arcmin) > Config::MAX_ALT_COMMAND_ARCMIN)
@@ -688,6 +824,7 @@ void processCommand(const char *command)
     }
     if (strncmp(body, "MAZ", 3) == 0)
     {
+        if (!motionAvailable(false)) return;
         float arcmin;
         if (!parseFloatStrict(body + 3, arcmin)) { setFault("BAD_AZ_CMD"); return; }
         if (arcmin == 0.0f || fabsf(arcmin) > Config::MAX_AZ_COMMAND_ARCMIN)
@@ -711,6 +848,7 @@ void processCommand(const char *command)
     }
     if (strncmp(body, "MXl", 3) == 0)
     {
+        if (!motionAvailable(true)) return;
         int32_t steps;
         if (!parseLongStrict(body + 3, steps))
         {
@@ -729,6 +867,7 @@ void processCommand(const char *command)
     }
     if (strncmp(body, "MXz", 3) == 0)
     {
+        if (!motionAvailable(true)) return;
         int32_t steps;
         if (!parseLongStrict(body + 3, steps))
         {
@@ -828,6 +967,7 @@ void serviceSerial()
 
 void setup()
 {
+    Serial.setTxBufferSize(Config::SERIAL_TX_BUFFER_BYTES);
     Serial.begin(Config::SERIAL_BAUD);
 
     preferences.begin("b1autoalign", false);
@@ -934,25 +1074,15 @@ void setup()
         else
             setFault("CONFIG_MIGRATED");
     }
+
+    if (!startMotionTimer())
+        setFault("MOTION_TIMER");
 }
 
 void loop()
 {
     serviceSerial();
-    const uint32_t nowUs = micros();
-    const uint32_t nowMs = millis();
-    const ServiceResult altResult = altitude.service(nowUs, nowMs);
-    const ServiceResult azResult = azimuth.service(nowUs, nowMs);
-    if (altResult == ServiceResult::Stepped || altResult == ServiceResult::Completed ||
-        altResult == ServiceResult::TimedOut || azResult == ServiceResult::Stepped ||
-        azResult == ServiceResult::Completed || azResult == ServiceResult::TimedOut)
-        markPositionDirty();
-    if (altResult == ServiceResult::TimedOut || azResult == ServiceResult::TimedOut)
-    {
-        altitude.stopNow(nowMs);
-        azimuth.stopNow(nowMs);
-        setFault(altResult == ServiceResult::TimedOut ? "ALT_TIMEOUT" : "AZ_TIMEOUT");
-    }
+    consumeMotionEvents();
     persistPositions(false);
     delay(0);
 }

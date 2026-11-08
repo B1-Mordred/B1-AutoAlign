@@ -12,6 +12,15 @@
 - Automation tests cover Ekos D-Bus capability parsing, solve-only capture setup, standard INDI camera/PAC discovery, WCS parsing, bounded local-solver invocation and backend fallback selection.
 - An executable C++ host test exercises real `MotionAxis.h` limit checks, 32-bit overflow rejection, release/timed/continuous holding, STOP behavior and timeout handling across `millis()` wrap.
 - Protocol tests cover v0.2 AZ-limit, holding and atomic-correction commands plus expanded status parsing.
+- Firmware v0.2.3 is flashed on the connected ESP32 and identifies correctly.
+- The timer-driven motion path completed a bounded 1,000-step ALT move away
+  from the upper limit and returned to exactly 62,000 while the client issued
+  21 full status polls in 2.97 seconds. Every sampled moving interval advanced,
+  and the controller reported no fault.
+- The guarded upper-reference restore changed ALT from 0 to the stored 62,000
+  maximum without motion and survived a hardware reset.
+- The desktop client communicates with the flashed v0.2.3 controller and its
+  completion-refresh behavior is covered by a protocol regression test.
 - The release archive from the precursor prototype passed ZIP integrity checking.
 
 ## Derived from the connected system
@@ -28,9 +37,9 @@
 
 ## Not yet verified
 
-- Upload and boot of B1-AutoAlign on the connected controller.
-- Physical confirmation that v0.2.1 positive ALT moves upward after flashing;
-  physical AZ direction also remains unverified.
+- Human confirmation that the previously audible/visible periodic stutter is
+  absent under load; software timing and position progression are verified.
+- Physical AZ direction remains unverified.
 - Motor enable polarity on the assembled controller.
 - Real angular calibration and repeatability.
 - Loaded holding, stopping, clearance and thermal behavior.
@@ -38,8 +47,5 @@
 - Ekos or standalone capture with an actual connected camera.
 - Plate solving an image from the actual telescope/camera optical train.
 - Three-frame polar-error calculation and any automatic motor correction.
-- Desktop-app communication with flashed B1-AutoAlign hardware.
 - Operation with the complete 25 kg telescope assembly.
 - Physical end switches or encoders; v0.2 limits remain open-loop.
-
-The existing controller firmware has not been replaced during repository creation.

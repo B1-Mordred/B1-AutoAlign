@@ -8,8 +8,8 @@ The USB serial interface runs at 19200 baud and uses colon-prefixed, hash-termin
 |---|---|
 | raw byte `0x06` | `P` (polar alignment mode) |
 | `:GVP#` | `B1-AutoAlign#` |
-| `:GVN#` | `V0.2.1#` |
-| `:GVF#` | `B1-AutoAlign V0.2.1#` |
+| `:GVN#` | `V0.2.3#` |
+| `:GVF#` | `B1-AutoAlign V0.2.3#` |
 | `:GR#` | fixed safe RA value |
 | `:GD#` | fixed safe DEC value |
 | `:GX#` | OpenAstroTech-compatible motion status |
@@ -43,6 +43,7 @@ STOP follows the configured holding policy: the default v0.2 behavior stops puls
 |---|---|
 | `:PAB#` | mark current ALT position as bottom/zero |
 | `:PAT#` | mark current positive ALT position as upper limit |
+| `:PAU#` | set current logical ALT position to its stored upper limit without motion |
 | `:PCT#` | clear the ALT upper limit |
 | `:PZB#` | mark current AZ position as lower limit/zero |
 | `:PZT#` | mark current positive AZ position as upper limit |
@@ -69,7 +70,7 @@ The two-axis correction is preflighted atomically. A `1#` reply means both legal
 
 ## Status response
 
-Firmware v0.2.1 returns an expanded comma-separated `PGL` response:
+Firmware v0.2.3 returns an expanded comma-separated `PGL` response:
 
 ```text
 AZ=0,ALT=0,AZMIN=0,AZMAX=5000,ALTMIN=0,ALTMAX=8000,
