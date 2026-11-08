@@ -15,17 +15,20 @@ The polar-alignment base carries a mechanically significant telescope assembly. 
 
 1. Upload B1-AutoAlign and confirm there is no startup motion.
 2. Query `:GVP#`; it must return `B1-AutoAlign#`.
-3. Query `:PGL#`; ALT must be zero at the lower reference.
-4. Send `:MXl10#`. Positive ALT must move upward, away from the bottom.
-5. If it moves down, stop immediately with `:Q#`, remove motor power and correct `ALT_DIR_INVERT`.
-6. Send `:MXl-10#` and confirm ALT returns to zero.
-7. At zero, attempt another negative move. It must return `0` and remain still.
-8. Repeat a small reversible raw-step test for AZ.
-9. Move AZ to its physical lower safe travel boundary and record it as AZ lower/zero.
-10. Traverse the safe AZ range under supervision and record the upper AZ limit.
-11. Measure real angular motion before changing the steps-per-arcminute values.
-12. Record an upper ALT soft limit only after the full safe travel is established.
-13. Confirm that status reports `LIMITS=1` before testing an atomic correction.
+3. At the physical ALT bottom, send `:PCT#` to clear any top limit recorded with
+   the old motor polarity, then `:PAB#` to mark the current position as bottom/zero.
+4. Query `:PGL#`; ALT must be zero and `ALTMAX` must be `NA`.
+5. Send `:MXl10#`. Positive ALT must move upward, away from the bottom.
+6. If it moves down, stop immediately with `:Q#`, remove motor power and change
+   the stored ALT direction from the desktop app or with `:PDI<alt>,<az>#`.
+7. Send `:MXl-10#` and confirm ALT returns to zero.
+8. At zero, attempt another negative move. It must return `0` and remain still.
+9. Repeat a small reversible raw-step test for AZ.
+10. Move AZ to its physical lower safe travel boundary and record it as AZ lower/zero.
+11. Traverse the safe AZ range under supervision and record the upper AZ limit.
+12. Measure real angular motion before changing the steps-per-arcminute values.
+13. Record a new upper ALT soft limit only after the full safe travel is established.
+14. Confirm that status reports `LIMITS=1` before testing an atomic correction.
 
 ## Motor holding
 

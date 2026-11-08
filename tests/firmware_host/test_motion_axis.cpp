@@ -62,6 +62,23 @@ static void testStopKeepsLoadHeld()
     assert(axis.position() == 1);
 }
 
+static void testRuntimeDirectionInversion()
+{
+    auto axis = makeAxis();
+    axis.begin(0);
+    assert(!axis.directionIsInverted());
+    assert(axis.moveBy(1, 0, 0) == MoveResult::Accepted);
+    assert(axis.service(30000, 1) == ServiceResult::Completed);
+    assert(fakePinLevels[2]);
+
+    axis.setCurrentPosition(0);
+    axis.setDirectionInverted(true);
+    assert(axis.directionIsInverted());
+    assert(axis.moveBy(1, 30000, 2) == MoveResult::Accepted);
+    assert(axis.service(60000, 3) == ServiceResult::Completed);
+    assert(!fakePinLevels[2]);
+}
+
 static void testTimeoutAcrossMillisWrap()
 {
     auto axis = makeAxis(100);
@@ -79,6 +96,7 @@ int main()
     testLimitsAndOverflow();
     testHoldPolicies();
     testStopKeepsLoadHeld();
+    testRuntimeDirectionInversion();
     testTimeoutAcrossMillisWrap();
     return 0;
 }

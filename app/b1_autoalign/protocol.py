@@ -49,6 +49,8 @@ class Snapshot:
     hold_delay_ms: Optional[int]
     az_driver_enabled: Optional[bool]
     alt_driver_enabled: Optional[bool]
+    alt_direction_inverted: Optional[bool]
+    az_direction_inverted: Optional[bool]
     limits_ready: Optional[bool]
     schema: Optional[int]
 
@@ -203,6 +205,8 @@ class B1AutoAlignClient:
             hold_delay_ms = int(fields["HOLDMS"]) if "HOLDMS" in fields else None
             az_driver_enabled = fields.get("AZEN") == "1" if "AZEN" in fields else None
             alt_driver_enabled = fields.get("ALTEN") == "1" if "ALTEN" in fields else None
+            alt_direction_inverted = fields.get("ALTINV") == "1" if "ALTINV" in fields else None
+            az_direction_inverted = fields.get("AZINV") == "1" if "AZINV" in fields else None
             limits_ready = fields.get("LIMITS") == "1" if "LIMITS" in fields else None
             schema = int(fields["SCHEMA"]) if "SCHEMA" in fields else None
         else:
@@ -224,6 +228,8 @@ class B1AutoAlignClient:
             hold_delay_ms = None
             az_driver_enabled = None
             alt_driver_enabled = None
+            alt_direction_inverted = None
+            az_direction_inverted = None
             limits_ready = None
             schema = None
 
@@ -247,6 +253,8 @@ class B1AutoAlignClient:
             hold_delay_ms=hold_delay_ms,
             az_driver_enabled=az_driver_enabled,
             alt_driver_enabled=alt_driver_enabled,
+            alt_direction_inverted=alt_direction_inverted,
+            az_direction_inverted=az_direction_inverted,
             limits_ready=limits_ready,
             schema=schema,
         )
@@ -325,6 +333,13 @@ class B1AutoAlignClient:
             raise ValueError("Hold delay must be between 0 and 600000 milliseconds")
         if self._query_hash(f":PHD{milliseconds}#") != "1":
             raise ProtocolError("Hold-delay command was rejected")
+
+    def set_direction_inversion(self, alt_inverted: bool, az_inverted: bool) -> None:
+        self._require_full_control()
+        alt_value = 1 if alt_inverted else 0
+        az_value = 1 if az_inverted else 0
+        if self._query_hash(f":PDI{alt_value},{az_value}#") != "1":
+            raise ProtocolError("Direction command was rejected; both axes must be idle")
 
     def release_drivers(self) -> None:
         self._require_full_control()

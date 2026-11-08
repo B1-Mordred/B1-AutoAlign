@@ -26,9 +26,23 @@ ENABLE is assumed to be active-low, as with common A4988-compatible stepper inte
 
 ## Direction
 
-A positive ALT command must move the base upward and away from its lower mechanical stop. Direction inversion is controlled by `ALT_DIR_INVERT` and `AZ_DIR_INVERT` near the top of the sketch.
+A positive ALT command must move the base upward and away from its lower
+mechanical stop. Firmware stores independent ALT/AZ inversion settings in NVS;
+they can be changed with `:PDI<alt>,<az>#` or from the desktop app. Compile-time
+defaults are `DEFAULT_ALT_DIR_INVERT` and `DEFAULT_AZ_DIR_INVERT`.
 
-The current values have not yet been physically verified with B1-AutoAlign. Test with a tiny positive move and no unsupported telescope load before changing them.
+The assembled base was observed to move upward only for negative ALT values with
+the original setting. Firmware v0.2.1 therefore defaults ALT to reversed and AZ
+to normal. The intended result is positive ALT = upward and negative ALT =
+downward. Confirm this with a tiny positive move and no unsupported telescope
+load after flashing.
+
+An ALT top limit recorded under the old polarity is invalid. At the physical
+bottom, clear the old ALT top limit and mark the current position as ALT
+bottom/zero before testing upward travel. Schema migration and the runtime
+direction command perform that reset for a changed ALT polarity, but the
+physical bottom still has to be confirmed by the operator. Do not reuse the old
+top limit.
 
 ## Calibration
 

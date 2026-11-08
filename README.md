@@ -15,14 +15,14 @@ The firmware identifies itself as `B1-AutoAlign` over the LX200-compatible seria
 - ESP32 control of two STEP/DIR/ENABLE stepper axes
 - OpenAstroExplorer v1 pin assignment
 - acceleration and conservative default step rates
-- persistent positions, calibration, ALT/AZ limits and holding policy in ESP32 NVS
+- persistent positions, calibration, ALT/AZ limits, motor directions and holding policy in ESP32 NVS
 - bilateral soft-limit support with an automatic-correction readiness interlock
 - atomic two-axis correction command with bounded magnitude
 - 180-second motion timeout and safe, non-crashing `:Q#` stop command
 - configurable release, timed-hold and always-hold motor policies
 - boot-time configuration validation and schema migration
 - LX200 handshake and fixed compatibility replies for Ekos/INDI
-- PA-specific status, limit and calibration commands
+- PA-specific status, limit, calibration and motor-direction commands
 - no automatic movement at startup
 - native Linux desktop app with strict legacy-firmware read-only mode
 - Ekos/KStars capture-and-solve integration over D-Bus, with solve-only action

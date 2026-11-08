@@ -31,7 +31,7 @@ class FirmwareContractTests(unittest.TestCase):
 
     def test_product_identity(self):
         self.assertIn('Serial.print("B1-AutoAlign#")', self.source)
-        self.assertIn('Serial.print("B1-AutoAlign V0.2.0#")', self.source)
+        self.assertIn('Serial.print("B1-AutoAlign V0.2.1#")', self.source)
 
     def test_oae_v1_pin_contract(self):
         expected = {
@@ -44,6 +44,13 @@ class FirmwareContractTests(unittest.TestCase):
         }
         for name, pin in expected.items():
             self.assertRegex(self.source, rf"constexpr uint8_t {name}\s*=\s*{pin};")
+
+    def test_altitude_positive_direction_is_inverted_for_assembled_base(self):
+        self.assertRegex(self.source, r"constexpr bool DEFAULT_ALT_DIR_INVERT\s*=\s*true;")
+        self.assertRegex(self.source, r"constexpr bool DEFAULT_AZ_DIR_INVERT\s*=\s*false;")
+        self.assertIn('strncmp(body, "PDI", 3) == 0', self.source)
+        self.assertIn('preferences.putBool("altInv", altDirInvert)', self.source)
+        self.assertIn('preferences.putBool("azInv", azDirInvert)', self.source)
 
     def test_lx200_raw_ack_handshake(self):
         self.assertIn("static_cast<uint8_t>(incoming) == 0x06", self.source)
@@ -63,7 +70,7 @@ class FirmwareContractTests(unittest.TestCase):
         self.assertIn("startAtomicRelativeMove", self.source)
         self.assertIn("MAX_ALT_COMMAND_ARCMIN", self.source)
         self.assertIn("MAX_AZ_COMMAND_ARCMIN", self.source)
-        self.assertIn("CONFIG_SCHEMA_VERSION = 2", self.source)
+        self.assertIn("CONFIG_SCHEMA_VERSION = 3", self.source)
         self.assertIn("ServiceResult::TimedOut", header)
         self.assertIn("HoldMode::Always", header)
 

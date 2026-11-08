@@ -2,11 +2,17 @@
 
 All notable changes to B1-AutoAlign will be documented here.
 
-## Unreleased
+## 0.2.1 - 2026-11-08
 
 - Added the ten official OpenAstroExplorer AutoPA/ALTAZ STL files.
 - Added pinned upstream provenance, CC BY-NC 4.0 licensing, print quantities,
   checksums, and automated binary STL integrity checks.
+- Added persistent, independently configurable ALT/AZ electrical direction
+  inversion in firmware and the desktop app.
+- Defaulted ALT to reversed so positive logical ALT moves upward on the
+  assembled base; AZ remains normal.
+- Added safe direction-change handling that resets the changed lower reference,
+  invalidates obsolete limits and locks automatic correction until requalified.
 
 ## 0.2.0 - 2026-11-07
 

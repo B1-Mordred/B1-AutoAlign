@@ -13,6 +13,7 @@ The B1-AutoAlign Control Center is a native PyQt6 application for Linux. It keep
 - mark the physical ALT bottom and upper soft limit;
 - clear the upper ALT limit;
 - mark and clear the AZ lower/upper soft limits;
+- display and persist independent ALT/AZ motor-direction inversion;
 - configure release, timed and continuous motor holding;
 - show correction-limit readiness and live driver-enable state;
 - store ALT and AZ steps-per-arcminute calibration;
@@ -28,6 +29,11 @@ Full controls are enabled only when `:GVP#` returns `B1-AutoAlign`. An older con
 This is intentional: the legacy V1.13.16 controller previously crashed when sent the generic `:Q#` stop command. B1-AutoAlign implements a safe `:Q#` path.
 
 Firmware v0.2.0 keeps motor torque according to the configured holding policy after STOP. The explicit **Release idle drivers** operation requires confirmation because releasing torque may permit a heavy load to back-drive the mechanism.
+
+Direction changes are commissioning operations. The app requires confirmation
+that every changed axis is at its physical lower safe boundary. Firmware then
+zeros that changed axis and clears its now-invalid upper limit(s); the safe
+range must be recorded again before automatic correction can become ready.
 
 ## Run from the checkout
 

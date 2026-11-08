@@ -8,8 +8,8 @@ The USB serial interface runs at 19200 baud and uses colon-prefixed, hash-termin
 |---|---|
 | raw byte `0x06` | `P` (polar alignment mode) |
 | `:GVP#` | `B1-AutoAlign#` |
-| `:GVN#` | `V0.2.0#` |
-| `:GVF#` | `B1-AutoAlign V0.2.0#` |
+| `:GVN#` | `V0.2.1#` |
+| `:GVF#` | `B1-AutoAlign V0.2.1#` |
 | `:GR#` | fixed safe RA value |
 | `:GD#` | fixed safe DEC value |
 | `:GX#` | OpenAstroTech-compatible motion status |
@@ -55,7 +55,13 @@ STOP follows the configured holding policy: the default v0.2 behavior stops puls
 | `:PHM2#` | hold continuously after motion (v0.2 default) |
 | `:PHD5000#` | set timed-hold delay in milliseconds, 0–600000 |
 | `:PDR#` | explicitly release both idle drivers |
+| `:PDI1,0#` | store ALT,AZ direction inversion (`1` = reversed, `0` = normal) |
 | `:PAC0.25,-0.10#` | atomic AZ/ALT correction in degrees |
+
+`PDI` is rejected while either axis is moving. If a setting changes, firmware
+assumes that axis is at its physical lower safe boundary, sets its logical
+position to zero and clears the affected upper limit(s). Applying the already
+stored settings does not alter positions or limits.
 
 `PAC` follows the upstream INDI sign convention expected by the integration layer: positive AZ is east, negative AZ west, positive ALT north/up and negative ALT south/down. Actual direction remains subject to physical direction verification. The command is rejected unless both axes are idle and both ALT/AZ travel ranges have been recorded.
 
@@ -63,15 +69,16 @@ The two-axis correction is preflighted atomically. A `1#` reply means both legal
 
 ## Status response
 
-Firmware v0.2.0 returns an expanded comma-separated `PGL` response:
+Firmware v0.2.1 returns an expanded comma-separated `PGL` response:
 
 ```text
 AZ=0,ALT=0,AZMIN=0,AZMAX=5000,ALTMIN=0,ALTMAX=8000,
 AZTARGET=0,ALTTARGET=0,ACAL=100.0000,ZCAL=11.0000,
-STATE=IDLE,FAULT=NONE,HOLD=2,HOLDMS=5000,AZEN=0,ALTEN=0,LIMITS=1,SCHEMA=2#
+STATE=IDLE,FAULT=NONE,HOLD=2,HOLDMS=5000,AZEN=0,ALTEN=0,
+ALTINV=1,AZINV=0,LIMITS=1,SCHEMA=3#
 ```
 
-`NA` represents an unset limit. `LIMITS=1` is the firmware interlock required by `PAC`. `AZEN` and `ALTEN` report the electrical driver-enable state, not whether an axis is moving.
+`NA` represents an unset limit. `LIMITS=1` is the firmware interlock required by `PAC`. `AZEN` and `ALTEN` report the electrical driver-enable state, not whether an axis is moving. `ALTINV` and `AZINV` are the persisted electrical-direction settings.
 
 Example:
 

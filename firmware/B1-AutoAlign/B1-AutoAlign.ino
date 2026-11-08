@@ -34,9 +34,10 @@ constexpr uint8_t AZ_EN_PIN    = 32;
 constexpr bool ENABLE_ACTIVE_LOW = true;
 
 // Change one of these only if a positive command moves that axis in the
-// mechanically negative direction.  Positive ALT must move up from bottom.
-constexpr bool ALT_DIR_INVERT = false;
-constexpr bool AZ_DIR_INVERT  = false;
+// mechanically negative direction.  The assembled base requires ALT
+// inversion so positive ALT moves up and away from the physical bottom.
+constexpr bool DEFAULT_ALT_DIR_INVERT = true;
+constexpr bool DEFAULT_AZ_DIR_INVERT  = false;
 
 // Conservative PA speeds.  These are step pulses at the driver input.
 constexpr float ALT_MAX_SPEED = 800.0f;
@@ -53,7 +54,7 @@ constexpr HoldMode DEFAULT_HOLD_MODE = HoldMode::Always;
 constexpr float MAX_ALT_COMMAND_ARCMIN = 140.0f;
 constexpr float MAX_AZ_COMMAND_ARCMIN = 320.0f;
 constexpr int32_t MAX_RAW_JOG_STEPS = 100000;
-constexpr uint32_t CONFIG_SCHEMA_VERSION = 2;
+constexpr uint32_t CONFIG_SCHEMA_VERSION = 3;
 
 // Migration defaults measured with the currently installed V1.13.16 setup.
 // Calibrate these against real angular movement before automated alignment.
@@ -67,10 +68,12 @@ constexpr int32_t DEFAULT_ALT_MIN = 0;
 }  // namespace Config
 
 Preferences preferences;
-StepDirAxis altitude("ALT", Config::ALT_STEP_PIN, Config::ALT_DIR_PIN, Config::ALT_EN_PIN, Config::ALT_DIR_INVERT,
+StepDirAxis altitude("ALT", Config::ALT_STEP_PIN, Config::ALT_DIR_PIN, Config::ALT_EN_PIN,
+                     Config::DEFAULT_ALT_DIR_INVERT,
                      Config::ENABLE_ACTIVE_LOW, Config::ALT_MAX_SPEED, Config::ALT_ACCEL, Config::START_SPEED,
                      Config::STEP_PULSE_US, Config::MOTION_TIMEOUT_MS);
-StepDirAxis azimuth("AZ", Config::AZ_STEP_PIN, Config::AZ_DIR_PIN, Config::AZ_EN_PIN, Config::AZ_DIR_INVERT,
+StepDirAxis azimuth("AZ", Config::AZ_STEP_PIN, Config::AZ_DIR_PIN, Config::AZ_EN_PIN,
+                    Config::DEFAULT_AZ_DIR_INVERT,
                     Config::ENABLE_ACTIVE_LOW, Config::AZ_MAX_SPEED, Config::AZ_ACCEL, Config::START_SPEED,
                     Config::STEP_PULSE_US, Config::MOTION_TIMEOUT_MS);
 
@@ -83,6 +86,8 @@ bool azMaxEnabled = false;
 int32_t azMaxPosition = 0;
 HoldMode holdMode = Config::DEFAULT_HOLD_MODE;
 uint32_t holdDelayMs = Config::DEFAULT_HOLD_DELAY_MS;
+bool altDirInvert = Config::DEFAULT_ALT_DIR_INVERT;
+bool azDirInvert = Config::DEFAULT_AZ_DIR_INVERT;
 bool positionDirty = false;
 uint32_t lastPositionChangeMs = 0;
 char lastFault[32] = "NONE";
@@ -128,6 +133,8 @@ void persistConfiguration()
     preferences.putLong("azMax", azMaxPosition);
     preferences.putUChar("holdMode", static_cast<uint8_t>(holdMode));
     preferences.putUInt("holdDelay", holdDelayMs);
+    preferences.putBool("altInv", altDirInvert);
+    preferences.putBool("azInv", azDirInvert);
 }
 
 bool limitsReady()
@@ -210,6 +217,16 @@ bool parseFloatPair(const char *text, float &first, float &second)
     char *end = nullptr;
     second = strtof(separator + 1, &end);
     return end != separator + 1 && *end == '\0' && isfinite(second);
+}
+
+bool parseDirectionPair(const char *text, bool &altInverted, bool &azInverted)
+{
+    if (text == nullptr || strlen(text) != 3 || text[1] != ',' ||
+        (text[0] != '0' && text[0] != '1') || (text[2] != '0' && text[2] != '1'))
+        return false;
+    altInverted = text[0] == '1';
+    azInverted = text[2] == '1';
+    return true;
 }
 
 bool arcminutesToSteps(float arcminutes, float calibration, int32_t &steps)
@@ -414,12 +431,65 @@ void handlePaExtension(const char *body)
         else
             Serial.print("NA");
         Serial.printf(",AZTARGET=%ld,ALTTARGET=%ld,ACAL=%.4f,ZCAL=%.4f,STATE=%s,FAULT=%s,"
-                      "HOLD=%u,HOLDMS=%lu,AZEN=%u,ALTEN=%u,LIMITS=%u,SCHEMA=%lu#",
+                      "HOLD=%u,HOLDMS=%lu,AZEN=%u,ALTEN=%u,ALTINV=%u,AZINV=%u,LIMITS=%u,SCHEMA=%lu#",
                       static_cast<long>(azimuth.targetPosition()), static_cast<long>(altitude.targetPosition()),
                       altStepsPerArcmin, azStepsPerArcmin, state, lastFault,
                       static_cast<unsigned>(holdMode), static_cast<unsigned long>(holdDelayMs),
                       azimuth.driverIsEnabled() ? 1U : 0U, altitude.driverIsEnabled() ? 1U : 0U,
+                      altDirInvert ? 1U : 0U, azDirInvert ? 1U : 0U,
                       limitsReady() ? 1U : 0U, static_cast<unsigned long>(Config::CONFIG_SCHEMA_VERSION));
+        return;
+    }
+    if (strncmp(body, "PDI", 3) == 0)  // Store ALT,AZ direction inversion at physical lower references.
+    {
+        bool requestedAltInvert = false;
+        bool requestedAzInvert = false;
+        if (!parseDirectionPair(body + 3, requestedAltInvert, requestedAzInvert))
+        {
+            setFault("BAD_DIRECTION");
+            Serial.print("0#");
+            return;
+        }
+        if (altitude.isMoving() || azimuth.isMoving())
+        {
+            setFault("BUSY");
+            Serial.print("0#");
+            return;
+        }
+
+        const bool altChanged = requestedAltInvert != altDirInvert;
+        const bool azChanged = requestedAzInvert != azDirInvert;
+        altDirInvert = requestedAltInvert;
+        azDirInvert = requestedAzInvert;
+        altitude.setDirectionInverted(altDirInvert);
+        azimuth.setDirectionInverted(azDirInvert);
+
+        // A changed motor polarity invalidates the affected open-loop reference.
+        // The command is only safe at that axis' physical lower boundary.
+        if (altChanged)
+        {
+            altitude.setCurrentPosition(0);
+            altMaxEnabled = false;
+            altMaxPosition = 0;
+            altitude.setLimits(true, 0, false, 0);
+        }
+        if (azChanged)
+        {
+            azimuth.setCurrentPosition(0);
+            azMinEnabled = true;
+            azMaxEnabled = false;
+            azMaxPosition = 0;
+            azimuth.setLimits(true, 0, false, 0);
+        }
+
+        persistConfiguration();
+        if (altChanged || azChanged)
+        {
+            markPositionDirty();
+            persistPositions(true);
+        }
+        setFault("NONE");
+        Serial.print("1#");
         return;
     }
     if (strncmp(body, "PAC", 3) == 0)  // Atomic AZ,ALT correction in degrees.
@@ -554,8 +624,8 @@ void processCommand(const char *command)
 
     // Identification and read-only mount compatibility.
     if (strcmp(body, "GVP") == 0) { Serial.print("B1-AutoAlign#"); return; }
-    if (strcmp(body, "GVN") == 0) { Serial.print("V0.2.0#"); return; }
-    if (strcmp(body, "GVF") == 0) { Serial.print("B1-AutoAlign V0.2.0#"); return; }
+    if (strcmp(body, "GVN") == 0) { Serial.print("V0.2.1#"); return; }
+    if (strcmp(body, "GVF") == 0) { Serial.print("B1-AutoAlign V0.2.1#"); return; }
     if (strcmp(body, "GVD") == 0) { Serial.print("Nov 2026#"); return; }
     if (strcmp(body, "GVT") == 0) { Serial.print("00:00:00#"); return; }
     if (strcmp(body, "GR") == 0)  { Serial.print("00:00:00#"); return; }
@@ -762,6 +832,7 @@ void setup()
 
     preferences.begin("b1autoalign", false);
     const uint32_t storedSchema = preferences.getUInt("schema", 0);
+    const bool directionSchemaMigration = storedSchema > 0 && storedSchema < 3;
     bool configurationRepaired = false;
 
     altStepsPerArcmin = preferences.getFloat("altCal", Config::DEFAULT_ALT_STEPS_PER_ARCMIN);
@@ -809,9 +880,20 @@ void setup()
         holdDelayMs = Config::DEFAULT_HOLD_DELAY_MS;
         configurationRepaired = true;
     }
+    altDirInvert = preferences.getBool("altInv", Config::DEFAULT_ALT_DIR_INVERT);
+    azDirInvert = preferences.getBool("azInv", Config::DEFAULT_AZ_DIR_INVERT);
 
     int32_t savedAlt = preferences.getLong("altPos", Config::DEFAULT_ALT_MIN);
     int32_t savedAz = preferences.getLong("azPos", 0);
+    if (directionSchemaMigration)
+    {
+        // Schema 3 changes the assembled-base ALT default. The documented
+        // upgrade procedure places ALT at the physical bottom before boot.
+        savedAlt = Config::DEFAULT_ALT_MIN;
+        altMaxEnabled = false;
+        altMaxPosition = 0;
+        configurationRepaired = true;
+    }
     if (savedAlt < Config::DEFAULT_ALT_MIN)
     {
         savedAlt = Config::DEFAULT_ALT_MIN;
@@ -833,6 +915,8 @@ void setup()
 
     altitude.begin(savedAlt);
     azimuth.begin(savedAz);
+    altitude.setDirectionInverted(altDirInvert);
+    azimuth.setDirectionInverted(azDirInvert);
     altitude.setLimits(true, Config::DEFAULT_ALT_MIN, altMaxEnabled, altMaxPosition);
     azimuth.setLimits(azMinEnabled, 0, azMaxEnabled, azMaxPosition);
     altitude.setHoldPolicy(holdMode, holdDelayMs);

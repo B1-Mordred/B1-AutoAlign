@@ -67,6 +67,11 @@ class StepDirAxis
             applyIdleHold(millis());
     }
 
+    void setDirectionInverted(bool inverted)
+    {
+        invertDir = inverted;
+    }
+
     MoveResult validateTarget(int32_t requested) const
     {
         if (isMoving())
@@ -196,6 +201,7 @@ class StepDirAxis
     bool hasMaximum() const { return maxEnabled; }
     HoldMode currentHoldMode() const { return holdMode; }
     uint32_t currentHoldDelayMs() const { return holdDelayMs; }
+    bool directionIsInverted() const { return invertDir; }
     const char *axisName() const { return name; }
 
   private:

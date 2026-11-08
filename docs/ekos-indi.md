@@ -30,6 +30,24 @@ The system package was not overwritten. Removing the user-local symlink restores
 
 The patch is for INDI 1.9.9 source and may not apply cleanly to newer INDI releases. Check the current upstream driver before using it elsewhere.
 
+## Motor-direction settings
+
+INDI's standard `TELESCOPE_REVERSE_MOTION` switches reverse the telescope
+mount's north/south and west/east manual motion. They refer to the tracked
+mount axes; they are not defined as polarity controls for separate AutoPA
+altitude/azimuth adjustment motors. The OpenAstroTech driver and the included
+INDI 1.9.9 patch do not expose AutoPA direction switches.
+
+B1-AutoAlign therefore owns this configuration in firmware and exposes it in
+the B1-AutoAlign desktop app. Ekos continues to send signed `MAL`/`MAZ` or
+future PAC corrections; firmware maps those logical signs to the configured
+electrical directions. A future INDI driver extension could expose the same
+`PDI` setting as custom switch properties, but standard Ekos reverse-motion
+controls must not be used as a substitute.
+
+References: [INDI telescope properties](https://github.com/indilib/indi/blob/master/libs/indibase/inditelescope.h)
+and [OpenAstroTech compile-time direction settings](https://github.com/OpenAstroTech/OpenAstroTracker-Firmware/blob/develop/Configuration_adv.hpp).
+
 ## Camera and solver integration
 
 The desktop app independently uses the KStars session D-Bus interface at `/KStars/Ekos/Align` when it exposes `captureAndSolve` and a camera is selected. It requests the solve-only action before every test, so the test does not sync or slew the equatorial mount.

@@ -127,6 +127,12 @@ class SerialWorker(QObject):
             elif kind == "hold_delay":
                 self.client.set_hold_delay(payload["milliseconds"])
                 message = f"Timed hold delay stored: {payload['milliseconds']} ms"
+            elif kind == "direction_inversion":
+                self.client.set_direction_inversion(payload["alt_inverted"], payload["az_inverted"])
+                message = (
+                    f"Motor direction stored: ALT {'reversed' if payload['alt_inverted'] else 'normal'}, "
+                    f"AZ {'reversed' if payload['az_inverted'] else 'normal'}"
+                )
             elif kind == "release_drivers":
                 self.client.release_drivers()
                 message = "Both idle motor drivers released"
@@ -319,6 +325,7 @@ class MainWindow(QMainWindow):
             ("AZ position", "az_position"),
             ("ALT limits", "alt_limits"),
             ("AZ limits", "az_limits"),
+            ("Motor direction", "direction"),
             ("Motor holding", "holding"),
             ("Auto limits", "auto_limits"),
             ("ALT calibration", "alt_cal"),
@@ -468,6 +475,26 @@ class MainWindow(QMainWindow):
         form.addRow("AZ", az_row)
         self.control_widgets.extend([self.alt_cal_input, alt_set, self.az_cal_input, az_set])
         setup_root.addWidget(calibration)
+
+        direction = QGroupBox("Motor direction — commissioning only")
+        direction_layout = QGridLayout(direction)
+        self.alt_direction_inverted = QCheckBox("Reverse ALT direction")
+        self.az_direction_inverted = QCheckBox("Reverse AZ direction")
+        direction_apply = QPushButton("Store directions")
+        direction_apply.clicked.connect(self._set_direction_inversion)
+        direction_note = QLabel(
+            "Only change an axis at its physical lower safe boundary. Changing polarity resets that axis "
+            "to zero and clears its recorded upper limit(s)."
+        )
+        direction_note.setWordWrap(True)
+        direction_layout.addWidget(self.alt_direction_inverted, 0, 0)
+        direction_layout.addWidget(self.az_direction_inverted, 0, 1)
+        direction_layout.addWidget(direction_apply, 0, 2)
+        direction_layout.addWidget(direction_note, 1, 0, 1, 3)
+        self.control_widgets.extend(
+            [self.alt_direction_inverted, self.az_direction_inverted, direction_apply]
+        )
+        setup_root.addWidget(direction)
 
         holding = QGroupBox("Motor holding — validate thermals under load")
         holding_form = QFormLayout(holding)
@@ -783,6 +810,17 @@ class MainWindow(QMainWindow):
         else:
             maximum = "not set" if data["az_max"] is None else f"{data['az_max']:,}"
             self.status_values["az_limits"].setText(f"{data['az_min']:,} … {maximum} steps")
+        if data["alt_direction_inverted"] is None or data["az_direction_inverted"] is None:
+            self.status_values["direction"].setText("unavailable")
+        else:
+            self.status_values["direction"].setText(
+                f"ALT {'reversed' if data['alt_direction_inverted'] else 'normal'}, "
+                f"AZ {'reversed' if data['az_direction_inverted'] else 'normal'}"
+            )
+            if not self.alt_direction_inverted.hasFocus():
+                self.alt_direction_inverted.setChecked(data["alt_direction_inverted"])
+            if not self.az_direction_inverted.hasFocus():
+                self.az_direction_inverted.setChecked(data["az_direction_inverted"])
         if data["hold_mode"] is None:
             self.status_values["holding"].setText("unavailable")
         else:
@@ -924,6 +962,19 @@ class MainWindow(QMainWindow):
             "and cannot back-drive either axis.",
         ):
             self._send_action({"kind": "release_drivers"})
+
+    def _set_direction_inversion(self) -> None:
+        if self._confirm(
+            "Change motor directions?",
+            "For every axis whose setting changes, confirm that the mechanism is at its physical lower "
+            "safe boundary. The firmware will set that axis coordinate to zero and clear its previous "
+            "upper limit(s). Re-record the safe travel range before automatic correction.",
+        ):
+            self._send_action({
+                "kind": "direction_inversion",
+                "alt_inverted": self.alt_direction_inverted.isChecked(),
+                "az_inverted": self.az_direction_inverted.isChecked(),
+            })
 
     def _set_calibration(self, axis: str, value: float) -> None:
         self._send_action({"kind": "calibration", "axis": axis, "value": value})

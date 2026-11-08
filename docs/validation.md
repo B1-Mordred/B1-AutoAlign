@@ -20,6 +20,8 @@
 - Previous controller identity: OpenAstroMount V1.13.16.
 - Observed conversion: ALT 100 and AZ 11 counter steps per commanded arcminute.
 - The physical lower ALT position was deliberately established as logical zero.
+- The assembled ALT drive was observed to require inversion: with the original
+  polarity, negative logical movement was required to move upward.
 - KStars 3.6.2 exposes generic Align capture/solve over session D-Bus, but no camera is currently selected.
 - INDI 1.9.9 is reachable on `localhost:7624`, but no camera or PAC device is currently exposed.
 - Astrometry.net 0.98, `solve-field`, `wcsinfo`, and 13 index files are available.
@@ -27,7 +29,8 @@
 ## Not yet verified
 
 - Upload and boot of B1-AutoAlign on the connected controller.
-- Physical ALT and AZ direction with this firmware.
+- Physical confirmation that v0.2.1 positive ALT moves upward after flashing;
+  physical AZ direction also remains unverified.
 - Motor enable polarity on the assembled controller.
 - Real angular calibration and repeatability.
 - Loaded holding, stopping, clearance and thermal behavior.

@@ -70,11 +70,11 @@ class ClientTests(unittest.TestCase):
     def test_full_identity_snapshot_and_motion_commands(self):
         client, fake = client_with({
             ":GVP#": [b"B1-AutoAlign#"],
-            ":GVN#": [b"V0.2.0#"],
+            ":GVN#": [b"V0.2.1#"],
             ":PGL#": [
                 b"AZ=11,ALT=100,AZMIN=0,AZMAX=500,ALTMIN=0,ALTMAX=1000,"
                 b"AZTARGET=11,ALTTARGET=100,ACAL=100.0,ZCAL=11.0,STATE=IDLE,FAULT=NONE,"
-                b"HOLD=2,HOLDMS=5000,AZEN=1,ALTEN=1,LIMITS=1,SCHEMA=2#"
+                b"HOLD=2,HOLDMS=5000,AZEN=1,ALTEN=1,ALTINV=1,AZINV=0,LIMITS=1,SCHEMA=3#"
             ],
             ":GX#": [b"Parked,------,0,0#"],
             ":MXl10#": [b"1"],
@@ -87,6 +87,8 @@ class ClientTests(unittest.TestCase):
         self.assertEqual((snapshot.az_min, snapshot.az_max), (0, 500))
         self.assertTrue(snapshot.limits_ready)
         self.assertEqual(snapshot.hold_mode, 2)
+        self.assertTrue(snapshot.alt_direction_inverted)
+        self.assertFalse(snapshot.az_direction_inverted)
         client.move_arcminutes("ALT", 1.25)
         client.move_steps("ALT", 10)
         self.assertIn(":MAL1.250#", fake.commands)
@@ -125,6 +127,7 @@ class ClientTests(unittest.TestCase):
             ":PZT#": [b"1#"],
             ":PHM2#": [b"1#"],
             ":PHD5000#": [b"1#"],
+            ":PDI1,0#": [b"1#"],
             ":PAC0.250000,-0.125000#": [b"1#"],
         })
         client.connect("fake")
@@ -132,9 +135,11 @@ class ClientTests(unittest.TestCase):
         client.mark_az_top()
         client.set_hold_mode(2)
         client.set_hold_delay(5000)
+        client.set_direction_inversion(True, False)
         client.move_correction_degrees(0.25, -0.125)
         self.assertIn(":PZB#", fake.commands)
         self.assertIn(":PZT#", fake.commands)
+        self.assertIn(":PDI1,0#", fake.commands)
         self.assertIn(":PAC0.250000,-0.125000#", fake.commands)
 
 
