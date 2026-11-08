@@ -116,6 +116,13 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('__version__ = "0.3.0"', package_init)
         self.assertIn('Serial.print("B1-AutoAlign V0.3.0#")', SOURCE.read_text(encoding="utf-8"))
 
+    def test_desktop_uses_unambiguous_physical_endstop_labels(self):
+        ui = (ROOT / "app" / "b1_autoalign" / "ui.py").read_text(encoding="utf-8")
+        self.assertIn('"West / minimum (zero)"', ui)
+        self.assertIn('"East / maximum"', ui)
+        self.assertIn('else "OK"', ui)
+        self.assertNotIn('else "clear"', ui)
+
     def test_autopa_model_set_and_checksums(self):
         model_dir = AUTOPA_MODELS / "STL"
         actual_names = {path.name for path in model_dir.glob("*.STL")}

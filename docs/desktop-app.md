@@ -14,9 +14,10 @@ The B1-AutoAlign Control Center is a native PyQt6 application for Linux. It keep
 - restore the logical ALT position to an already stored upper reference without
   sending motor pulses;
 - clear the upper ALT limit;
-- mark and clear the AZ lower/upper soft limits;
-- show live SENSOR1/GPIO39 and SENSOR2/GPIO36 clear/triggered states;
-- assign one physical endstop to each axis and choose its minimum/maximum role;
+- mark and clear the AZ west/east soft limits;
+- show live SENSOR1/GPIO39 and SENSOR2/GPIO36 OK/triggered states;
+- assign one physical endstop to each axis and choose ALT bottom/top or AZ
+  west/east explicitly;
 - start bounded, guarded ALT or AZ endstop homing;
 - display and persist independent ALT/AZ motor-direction inversion;
 - configure release, timed and continuous motor holding;
@@ -51,6 +52,12 @@ stored configuration—not an uncommitted dropdown edit—and requires confirmat
 It searches at most 100,000 steps, retains the normal 180-second timeout and can
 be aborted with **STOP BOTH AXES**. A maximum-side switch can only home after its
 upper soft reference has been recorded.
+
+The commissioned coordinate convention is **ALT bottom = minimum/zero**, **ALT
+top = maximum**, **AZ west = minimum/zero**, and **AZ east = maximum**. These
+physical names are shown throughout the interface; minimum/maximum remain only
+the protocol-level representation. A non-triggered sensor is displayed as
+**OK**, while an actuated or open NC switch is displayed as **TRIGGERED**.
 
 ## Run from the checkout
 

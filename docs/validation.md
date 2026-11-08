@@ -19,7 +19,7 @@
 - The schema-4 migration preserved AZ `66,033`, ALT `59,700`, ALT range
   `0…62,000`, AZ range `0…66,033`, both direction settings, holding policy and
   `LIMITS=1`; no startup motion occurred and both drivers reported disabled.
-- `PGL` reports clear SENSOR1/GPIO39 and SENSOR2/GPIO36 inputs plus disabled
+- `PGL` reports inactive SENSOR1/GPIO39 and SENSOR2/GPIO36 inputs plus disabled
   assignments after migration. The earlier direct GPIO test observed independent
   LOW/HIGH/LOW transitions on both wired switches with no cross-triggering.
 - Live v0.3.0 no-motion tests rejected homing while the ALT input was disabled,

@@ -16,8 +16,9 @@ All notable changes to B1-AutoAlign will be documented here.
   maximum-side homing requires an existing stored upper reference.
 - Added live input/configuration fields to `PGL`, endstop configuration and
   homing protocol commands, and an `ENDSW` capability report.
-- Added desktop input/side assignment, live clear/triggered status, guarded
-  homing controls, and endstop-aware safety messaging.
+- Added desktop input/side assignment, live OK/triggered status, explicit ALT
+  bottom/top and AZ west/east labels, guarded homing controls, and endstop-aware
+  safety messaging.
 - Added executable debounce, timer-wrap, direction-policy and bounded-homing
   host tests. Configuration schema is now 4.
 

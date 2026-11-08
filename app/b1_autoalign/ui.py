@@ -117,10 +117,10 @@ class SerialWorker(QObject):
                 message = "ALT upper limit cleared"
             elif kind == "mark_az_bottom":
                 self.client.mark_az_bottom()
-                message = "Current AZ position marked as lower limit/zero"
+                message = "Current AZ position marked as west limit/zero"
             elif kind == "mark_az_top":
                 self.client.mark_az_top()
-                message = "Current AZ position stored as upper limit"
+                message = "Current AZ position stored as east limit"
             elif kind == "clear_az_limits":
                 self.client.clear_az_limits()
                 message = "Both AZ limits cleared"
@@ -484,8 +484,8 @@ class MainWindow(QMainWindow):
 
         az_management = QGroupBox("AZ reference and limits")
         az_management_layout = QGridLayout(az_management)
-        az_bottom_button = QPushButton("Mark current AZ as lower/zero")
-        az_top_button = QPushButton("Mark current AZ as upper")
+        az_bottom_button = QPushButton("Mark current AZ as west/zero")
+        az_top_button = QPushButton("Mark current AZ as east")
         az_clear_button = QPushButton("Clear both AZ limits")
         az_bottom_button.clicked.connect(self._mark_az_bottom)
         az_top_button.clicked.connect(self._mark_az_top)
@@ -506,9 +506,10 @@ class MainWindow(QMainWindow):
             combo.addItem("SENSOR2 / GPIO36", 2)
         self.alt_endstop_side = QComboBox()
         self.az_endstop_side = QComboBox()
-        for combo in (self.alt_endstop_side, self.az_endstop_side):
-            combo.addItem("Minimum / lower", 0)
-            combo.addItem("Maximum / upper", 1)
+        self.alt_endstop_side.addItem("Bottom / minimum (zero)", 0)
+        self.alt_endstop_side.addItem("Top / maximum", 1)
+        self.az_endstop_side.addItem("West / minimum (zero)", 0)
+        self.az_endstop_side.addItem("East / maximum", 1)
         endstop_layout.addWidget(QLabel("Axis"), 0, 0)
         endstop_layout.addWidget(QLabel("Input"), 0, 1)
         endstop_layout.addWidget(QLabel("Reference side"), 0, 2)
@@ -910,24 +911,28 @@ class MainWindow(QMainWindow):
             self.status_values["sensor1"].setText("unavailable on this firmware")
             self.status_values["sensor2"].setText("unavailable on this firmware")
         else:
-            self.status_values["sensor1"].setText("TRIGGERED" if data["sensor1_active"] else "clear")
-            self.status_values["sensor2"].setText("TRIGGERED" if data["sensor2_active"] else "clear")
+            self.status_values["sensor1"].setText("TRIGGERED" if data["sensor1_active"] else "OK")
+            self.status_values["sensor2"].setText("TRIGGERED" if data["sensor2_active"] else "OK")
 
-        def endstop_description(source: Optional[int], side: Optional[int]) -> str:
+        def endstop_description(axis: str, source: Optional[int], side: Optional[int]) -> str:
             if source is None or side is None:
                 return "unavailable"
             if source == 0:
                 return "disabled"
             input_names = {1: "SENSOR1 / GPIO39", 2: "SENSOR2 / GPIO36"}
             active_states = {1: data["sensor1_active"], 2: data["sensor2_active"]}
-            state = "TRIGGERED" if active_states.get(source) else "clear"
-            return f"{input_names.get(source, 'invalid')}, {'minimum' if side == 0 else 'maximum'} — {state}"
+            state = "TRIGGERED" if active_states.get(source) else "OK"
+            if axis == "AZ":
+                role = "west / minimum" if side == 0 else "east / maximum"
+            else:
+                role = "bottom / minimum" if side == 0 else "top / maximum"
+            return f"{input_names.get(source, 'invalid')}, {role} — {state}"
 
         self.status_values["alt_endstop"].setText(
-            endstop_description(data["alt_endstop_source"], data["alt_endstop_side"])
+            endstop_description("ALT", data["alt_endstop_source"], data["alt_endstop_side"])
         )
         self.status_values["az_endstop"].setText(
-            endstop_description(data["az_endstop_source"], data["az_endstop_side"])
+            endstop_description("AZ", data["az_endstop_source"], data["az_endstop_side"])
         )
         self._stored_endstop_config["ALT"] = (
             data["alt_endstop_source"], data["alt_endstop_side"]
@@ -948,7 +953,8 @@ class MainWindow(QMainWindow):
         if self.full_control and data["alt_endstop_source"] is not None:
             if data["alt_endstop_source"] and data["az_endstop_source"]:
                 self.safety_banner.setText(
-                    "Physical endstops are armed. Verify each input and min/max assignment before homing under load."
+                    "Physical endstops are armed. Verify the ALT bottom/top and AZ west/east assignments "
+                    "before homing under load."
                 )
             else:
                 self.safety_banner.setText(
@@ -1086,17 +1092,17 @@ class MainWindow(QMainWindow):
 
     def _mark_az_bottom(self) -> None:
         if self._confirm(
-            "Set AZ lower limit?",
-            "Confirm that the AZ mechanism is at its physical lower safe travel limit. "
+            "Set AZ west limit?",
+            "Confirm that the AZ mechanism is at its physical west safe travel limit. "
             "The current AZ coordinate becomes zero.",
         ):
             self._send_action({"kind": "mark_az_bottom"})
 
     def _mark_az_top(self) -> None:
         if self._confirm(
-            "Set AZ upper limit?",
-            "The current positive AZ position will become the upper soft limit. "
-            "Record the lower AZ limit first.",
+            "Set AZ east limit?",
+            "The current positive AZ position will become the east soft limit. "
+            "Record the west AZ limit first.",
         ):
             self._send_action({"kind": "mark_az_top"})
 
@@ -1118,8 +1124,8 @@ class MainWindow(QMainWindow):
     def _set_direction_inversion(self) -> None:
         if self._confirm(
             "Change motor directions?",
-            "For every axis whose setting changes, confirm that the mechanism is at its physical lower "
-            "safe boundary. The firmware will set that axis coordinate to zero and clear its previous "
+            "For every axis whose setting changes, confirm that the mechanism is at its zero boundary "
+            "(ALT bottom or AZ west). The firmware will set that axis coordinate to zero and clear its previous "
             "upper limit(s). Re-record the safe travel range before automatic correction.",
         ):
             self._send_action({
@@ -1138,7 +1144,7 @@ class MainWindow(QMainWindow):
             return
         if self._confirm(
             "Store physical endstop assignment?",
-            "Confirm the selected GPIO connector and physical minimum/maximum side for each axis. "
+            "Confirm the selected GPIO connector and physical side: ALT bottom/top and AZ west/east. "
             "An incorrect side assignment defeats hard-limit protection. Both axes must be stationary.",
         ):
             self._send_action({
@@ -1155,12 +1161,15 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Endstop disabled", f"Assign and store an {axis} endstop first.")
             return
         input_name = "SENSOR1 / GPIO39" if source == 1 else "SENSOR2 / GPIO36"
-        side = "minimum" if stored_side == 0 else "maximum"
+        if axis == "AZ":
+            side = "west" if stored_side == 0 else "east"
+        else:
+            side = "bottom" if stored_side == 0 else "top"
         if self._confirm(
             f"Home {axis} toward its {side} endstop?",
             f"The {axis} motor will move toward its stored {input_name} {side} switch for at most 100,000 steps. "
             "Keep the mechanism in view and use STOP if anything moves in the wrong direction. "
-            "A maximum-side endstop requires a stored upper soft-limit reference.",
+            "A top/east endstop requires a stored maximum soft-limit reference.",
         ):
             self._send_action({"kind": "home_endstop", "axis": axis})
 

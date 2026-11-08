@@ -25,7 +25,7 @@ The firmware identifies itself as `B1-AutoAlign` over the LX200-compatible seria
 - microsecond timer-driven STEP scheduling independent of serial polling
 - persistent positions, calibration, ALT/AZ limits, motor directions and holding policy in ESP32 NVS
 - bilateral soft-limit support with an automatic-correction readiness interlock
-- debounced SENSOR1/GPIO39 and SENSOR2/GPIO36 physical endstops with configurable ALT/AZ and min/max assignment
+- debounced SENSOR1/GPIO39 and SENSOR2/GPIO36 physical endstops with configurable ALT bottom/top and AZ west/east assignment
 - motion-into-limit rejection, two-axis emergency stop, escape motion and bounded endstop homing
 - atomic two-axis correction command with bounded magnitude
 - 180-second motion timeout and safe, non-crashing `:Q#` stop command

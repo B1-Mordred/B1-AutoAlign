@@ -45,8 +45,8 @@ STOP follows the configured holding policy: the default v0.2 behavior stops puls
 | `:PAT#` | mark current positive ALT position as upper limit |
 | `:PAU#` | set current logical ALT position to its stored upper limit without motion |
 | `:PCT#` | clear the ALT upper limit |
-| `:PZB#` | mark current AZ position as lower limit/zero |
-| `:PZT#` | mark current positive AZ position as upper limit |
+| `:PZB#` | mark current AZ position as west limit/zero |
+| `:PZT#` | mark current positive AZ position as east limit |
 | `:PZC#` | clear both AZ limits |
 | `:PGL#` | report positions, targets, limits, calibration, holding, drivers, state and last fault |
 | `:PCAl100.0#` | set ALT steps per arcminute |
@@ -58,7 +58,7 @@ STOP follows the configured holding policy: the default v0.2 behavior stops puls
 | `:PDR#` | explicitly release both idle drivers |
 | `:PDI1,0#` | store ALT,AZ direction inversion (`1` = reversed, `0` = normal) |
 | `:PAC0.25,-0.10#` | atomic AZ/ALT correction in degrees |
-| `:PES1,0,2,0#` | assign ALT to SENSOR1/minimum and AZ to SENSOR2/minimum |
+| `:PES1,0,2,0#` | assign ALT to SENSOR1/bottom and AZ to SENSOR2/west |
 | `:PHEA#` | start bounded ALT homing toward its configured endstop |
 | `:PHEZ#` | start bounded AZ homing toward its configured endstop |
 
@@ -73,9 +73,10 @@ The two-axis correction is preflighted atomically. A `1#` reply means both legal
 
 `PES` accepts four integers: ALT source, ALT side, AZ source and AZ side.
 Source `0` disables an axis, `1` selects SENSOR1/GPIO39 and `2` selects
-SENSOR2/GPIO36. Side `0` is minimum and side `1` is maximum. One nonzero source
-cannot be assigned to both axes. The setting is persistent and is rejected
-while either axis moves.
+SENSOR2/GPIO36. Side `0` is ALT bottom or AZ west (protocol minimum/zero), and
+side `1` is ALT top or AZ east (protocol maximum). One nonzero source cannot be
+assigned to both axes. The setting is persistent and is rejected while either
+axis moves.
 
 `PHEA` and `PHEZ` acknowledge that homing was accepted; completion is reported
 through `STATE` and `FAULT`. The search is limited to 100,000 steps and retains

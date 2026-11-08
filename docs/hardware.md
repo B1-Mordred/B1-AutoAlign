@@ -111,13 +111,19 @@ The default is a software precaution, not proof that the axes can safely hold 25
 
 ## Limit model
 
-ALT always has a logical lower limit at zero and supports a recorded upper limit. AZ v0.2.0 supports a recorded lower/zero reference and upper limit. Automatic correction commands remain locked until all four logical boundaries are present.
+ALT always has a logical bottom limit at zero and supports a recorded top
+limit. AZ v0.2.0 uses west as its zero/minimum reference and east as its
+positive maximum. Automatic correction commands remain locked until all four
+logical boundaries are present.
 
 Firmware v0.3.0 adds one physical endstop per axis while retaining the bilateral
 soft limits. An active assigned endstop blocks motion farther into its configured
 side, but permits motion away from it. If an assigned switch triggers during
 motion, firmware stops both axes. Reaching a minimum endstop establishes zero;
 reaching a maximum endstop restores the previously recorded upper coordinate.
+For the commissioned assembly and desktop UI, those roles are named ALT
+bottom/top and AZ west/east respectively: AZ west is minimum/zero and AZ east
+is maximum.
 
 Endstops reduce travel-overrun risk but do not detect stalls, missed steps,
 coupler slip or unsafe motion in the opposite direction. One switch per axis is

@@ -24,8 +24,8 @@ The polar-alignment base carries a mechanically significant telescope assembly. 
 7. Send `:MXl-10#` and confirm ALT returns to zero.
 8. At zero, attempt another negative move. It must return `0` and remain still.
 9. Repeat a small reversible raw-step test for AZ.
-10. Move AZ to its physical lower safe travel boundary and record it as AZ lower/zero.
-11. Traverse the safe AZ range under supervision and record the upper AZ limit.
+10. Move AZ to its physical west safe travel boundary and record it as AZ west/zero.
+11. Traverse the safe AZ range under supervision and record the east AZ limit.
 12. Measure real angular motion before changing the steps-per-arcminute values.
 13. Record a new upper ALT soft limit only after the full safe travel is established.
 14. Confirm that status reports `LIMITS=1` before testing an atomic correction.
@@ -38,8 +38,8 @@ The polar-alignment base carries a mechanically significant telescope assembly. 
 3. Verify the signal is approximately 0 V released and no more than about
    3.3 V triggered. A logic-state test alone cannot detect an unsafe 5 V input.
 4. Mount each switch so it opens before the mechanism reaches a damaging hard stop.
-5. Store the correct axis, connector and minimum/maximum side assignment while
-   both axes are stationary.
+5. Store the correct axis, connector and physical side assignment (ALT
+   bottom/top or AZ west/east) while both axes are stationary.
 6. With the load independently supported, trigger the switch by hand and send a
    tiny command farther into the configured side. It must be rejected without a step.
 7. Confirm a tiny command away from the switch is allowed, then release it.
