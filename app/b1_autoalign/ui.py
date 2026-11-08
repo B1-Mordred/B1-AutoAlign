@@ -806,7 +806,7 @@ class MainWindow(QMainWindow):
             maximum = "not set" if data["alt_max"] is None else f"{data['alt_max']:,}"
             self.status_values["alt_limits"].setText(f"{data['alt_min']:,} … {maximum} steps")
         if data["az_min"] is None:
-            self.status_values["az_limits"].setText("not set / unavailable")
+            self.status_values["az_limits"].setText("not set" if self.full_control else "unavailable")
         else:
             maximum = "not set" if data["az_max"] is None else f"{data['az_max']:,}"
             self.status_values["az_limits"].setText(f"{data['az_min']:,} … {maximum} steps")
