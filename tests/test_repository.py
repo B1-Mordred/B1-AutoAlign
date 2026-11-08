@@ -92,6 +92,15 @@ class FirmwareContractTests(unittest.TestCase):
 
 
 class RepositoryTests(unittest.TestCase):
+    def test_release_versions_are_consistent(self):
+        project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        package_init = (ROOT / "app" / "b1_autoalign" / "__init__.py").read_text(encoding="utf-8")
+        version = re.search(r'^version\s*=\s*"([^"]+)"', project, re.MULTILINE)
+        self.assertIsNotNone(version)
+        self.assertEqual(version.group(1), "0.2.3")
+        self.assertIn('__version__ = "0.2.3"', package_init)
+        self.assertIn('Serial.print("B1-AutoAlign V0.2.3#")', SOURCE.read_text(encoding="utf-8"))
+
     def test_autopa_model_set_and_checksums(self):
         model_dir = AUTOPA_MODELS / "STL"
         actual_names = {path.name for path in model_dir.glob("*.STL")}

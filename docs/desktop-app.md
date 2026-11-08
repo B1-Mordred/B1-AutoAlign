@@ -11,6 +11,8 @@ The B1-AutoAlign Control Center is a native PyQt6 application for Linux. It keep
 - send an immediate safe stop to B1-AutoAlign firmware;
 - set both logical coordinates to zero;
 - mark the physical ALT bottom and upper soft limit;
+- restore the logical ALT position to an already stored upper reference without
+  sending motor pulses;
 - clear the upper ALT limit;
 - mark and clear the AZ lower/upper soft limits;
 - display and persist independent ALT/AZ motor-direction inversion;
@@ -21,6 +23,11 @@ The B1-AutoAlign Control Center is a native PyQt6 application for Linux. It keep
 - fall back to a standard INDI camera plus local Astrometry.net;
 - perform an explicit single capture-and-solve test without moving either PA axis;
 - maintain a timestamped command and activity log.
+
+The protocol client also resynchronizes once after an interrupted previous
+connection leaves a status response in flight. When a move completes between
+the separate position and motion-state queries, it refreshes once so the UI
+shows the settled final coordinate rather than the last moving sample.
 
 ## Firmware safety gate
 

@@ -13,6 +13,11 @@ All notable changes to B1-AutoAlign will be documented here.
   separate position and motion-state queries, avoiding a stale final readout.
 - Resynchronize once when reconnecting after a previous process was interrupted
   with a status reply still in flight.
+- Updated public status, validation records and package metadata to v0.2.3;
+  documented the commissioned ALT/AZ ranges and the controller's manual
+  BOOT/EN upload sequence.
+- Added Arduino-bundled `esptool` discovery and a no-reset application-partition
+  update helper for controllers without reliable automatic reset wiring.
 
 ## 0.2.2 - 2026-11-08
 

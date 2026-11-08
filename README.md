@@ -8,13 +8,19 @@ The repository also includes a native PyQt6 desktop control center for connectio
 
 The firmware identifies itself as `B1-AutoAlign` over the LX200-compatible serial protocol and is intended to work with the patched INDI `LX200 OpenAstroTech` driver used by Ekos.
 
-> **Development status:** source and host-side tooling are build-validated, but this firmware has not been flashed to the connected controller. Direction, angular calibration, holding behavior and motion under the full telescope load remain physically unverified.
+> **Development status:** firmware v0.2.3 is flashed and communicating with the
+> connected controller. Timer-driven ALT motion under intensive status polling,
+> logical reference recovery, persistence across reset, direction polarity and
+> the commissioned soft-limit ranges have been validated. Real angular
+> calibration, thermal/holding behavior and unattended operation under the full
+> telescope load remain unverified.
 
 ## Features
 
 - ESP32 control of two STEP/DIR/ENABLE stepper axes
 - OpenAstroExplorer v1 pin assignment
 - acceleration and conservative default step rates
+- microsecond timer-driven STEP scheduling independent of serial polling
 - persistent positions, calibration, ALT/AZ limits, motor directions and holding policy in ESP32 NVS
 - bilateral soft-limit support with an automatic-correction readiness interlock
 - atomic two-axis correction command with bounded magnitude
@@ -23,6 +29,7 @@ The firmware identifies itself as `B1-AutoAlign` over the LX200-compatible seria
 - boot-time configuration validation and schema migration
 - LX200 handshake and fixed compatibility replies for Ekos/INDI
 - PA-specific status, limit, calibration and motor-direction commands
+- guarded no-motion recovery to an already stored ALT upper reference
 - no automatic movement at startup
 - native Linux desktop app with strict legacy-firmware read-only mode
 - Ekos/KStars capture-and-solve integration over D-Bus, with solve-only action

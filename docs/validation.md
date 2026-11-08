@@ -21,6 +21,9 @@
   maximum without motion and survived a hardware reset.
 - The desktop client communicates with the flashed v0.2.3 controller and its
   completion-refresh behavior is covered by a protocol regression test.
+- The commissioned open-loop ranges are ALT `0…62,000` and AZ
+  `0…66,033`; west is AZ zero, east is the positive upper limit, and the live
+  controller reports `LIMITS=1`.
 - The release archive from the precursor prototype passed ZIP integrity checking.
 
 ## Derived from the connected system
@@ -31,6 +34,8 @@
 - The physical lower ALT position was deliberately established as logical zero.
 - The assembled ALT drive was observed to require inversion: with the original
   polarity, negative logical movement was required to move upward.
+- Physical AZ travel was commissioned west-to-east as logical `0…66,033`,
+  confirming that positive AZ moves east on this assembly.
 - KStars 3.6.2 exposes generic Align capture/solve over session D-Bus, but no camera is currently selected.
 - INDI 1.9.9 is reachable on `localhost:7624`, but no camera or PAC device is currently exposed.
 - Astrometry.net 0.98, `solve-field`, `wcsinfo`, and 13 index files are available.
@@ -39,7 +44,6 @@
 
 - Human confirmation that the previously audible/visible periodic stutter is
   absent under load; software timing and position progression are verified.
-- Physical AZ direction remains unverified.
 - Motor enable polarity on the assembled controller.
 - Real angular calibration and repeatability.
 - Loaded holding, stopping, clearance and thermal behavior.

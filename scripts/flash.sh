@@ -8,7 +8,7 @@ fi
 
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 b1_port=$1
-b1_fqbn=${B1_FQBN:-esp32:esp32:esp32}
+b1_fqbn=${B1_FQBN:-esp32:esp32:esp32:UploadSpeed=460800}
 
 if [[ ! -e "$b1_port" ]]; then
     echo "Serial device does not exist: $b1_port" >&2
