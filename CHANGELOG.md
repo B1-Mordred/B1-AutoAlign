@@ -2,6 +2,12 @@
 
 All notable changes to B1-AutoAlign will be documented here.
 
+## Unreleased
+
+- Added the ten official OpenAstroExplorer AutoPA/ALTAZ STL files.
+- Added pinned upstream provenance, CC BY-NC 4.0 licensing, print quantities,
+  checksums, and automated binary STL integrity checks.
+
 ## 0.2.0 - 2026-11-07
 
 - Added ALT/AZ soft-limit readiness for automatic corrections.

@@ -41,6 +41,7 @@ scripts/                 build, check, flash and flash-backup helpers
 tools/                   serial diagnostic client
 tests/                   repository, protocol and executable motion-policy tests
 integrations/indi-1.9.9/ legacy INDI OpenAstroTech PA-control patch
+hardware/                 imported AutoPA printable parts and provenance
 .github/workflows/       continuous-integration build
 ```
 
@@ -69,6 +70,7 @@ Before any future upload, read [Safety](docs/safety.md), make a flash backup, su
 - [Changelog](CHANGELOG.md)
 - [Build and installation](docs/build.md)
 - [Hardware mapping](docs/hardware.md)
+- [OpenAstroExplorer AutoPA printable parts](hardware/openastroexplorer-autopa/README.md)
 - [Serial protocol](docs/protocol.md)
 - [Desktop application](docs/desktop-app.md)
 - [Automation backends](docs/automation-backends.md)
@@ -78,4 +80,4 @@ Before any future upload, read [Safety](docs/safety.md), make a flash backup, su
 
 ## License and attribution
 
-B1-AutoAlign is released under the [MIT License](LICENSE). The hardware pin mapping and protocol behavior were derived from the MIT-licensed OpenAstroTech project; see [third-party notices](THIRD_PARTY_NOTICES.md).
+B1-AutoAlign source code is released under the [MIT License](LICENSE). The imported OpenAstroExplorer AutoPA STL files are separately licensed under CC BY-NC 4.0; see their [model license](hardware/openastroexplorer-autopa/LICENSE.md) and [third-party notices](THIRD_PARTY_NOTICES.md).

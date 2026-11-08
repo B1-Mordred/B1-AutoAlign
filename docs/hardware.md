@@ -1,5 +1,18 @@
 # Hardware mapping
 
+## Printable AutoPA mechanism
+
+The repository includes the ten official OpenAstroExplorer AutoPA/ALTAZ STL
+files under [hardware/openastroexplorer-autopa](../hardware/openastroexplorer-autopa/README.md),
+together with pinned source provenance, print quantities, SHA-256 checksums and
+the separate CC BY-NC 4.0 license.
+
+Only the polar-alignment mechanism is included; unrelated RA/DEC, tracker,
+tripod and counterweight models are excluded. The imported geometry is not a
+validated 25 kg design. Treat the load rating, material choice, fasteners,
+bearings, motor sizing, balance and physical safety factor as separate
+engineering work.
+
 ## Controller
 
 B1-AutoAlign currently targets an ESP32 using the OpenAstroExplorer board v1 pinout.
