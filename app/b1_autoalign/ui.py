@@ -346,12 +346,14 @@ class MainWindow(QMainWindow):
 
     def _axis_group(self, axis: str, maximum: float) -> QGroupBox:
         group = QGroupBox(f"{axis} jog")
+        group.setMinimumHeight(195)
         layout = QGridLayout(group)
         position_caption = QLabel("Current position")
         position_caption.setObjectName("FieldCaption")
         position_value = QLabel("— steps")
         position_value.setObjectName("PositionReadout")
         position_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        position_value.setMinimumHeight(48)
         position_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.axis_position_values[axis] = position_value
         amount = QDoubleSpinBox()
@@ -391,7 +393,13 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         motion_tab = QWidget()
-        motion_root = QVBoxLayout(motion_tab)
+        motion_tab_root = QVBoxLayout(motion_tab)
+        motion_tab_root.setContentsMargins(0, 0, 0, 0)
+        motion_scroll = QScrollArea()
+        motion_scroll.setWidgetResizable(True)
+        motion_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        motion_content = QWidget()
+        motion_root = QVBoxLayout(motion_content)
         motion_root.setContentsMargins(4, 8, 4, 4)
         axes = QHBoxLayout()
         axes.addWidget(self._axis_group("ALT", 140.0))
@@ -419,6 +427,8 @@ class MainWindow(QMainWindow):
         self.control_widgets.extend([self.raw_steps, *raw_buttons])
         motion_root.addWidget(raw_group)
         motion_root.addStretch()
+        motion_scroll.setWidget(motion_content)
+        motion_tab_root.addWidget(motion_scroll)
         tabs.addTab(motion_tab, "Motion")
 
         setup_tab = QWidget()
@@ -705,7 +715,7 @@ class MainWindow(QMainWindow):
             QLabel#FieldCaption { color: #8f9bb0; }
             QLabel#PositionReadout {
                 background: #10141b; border: 1px solid #3a4354; border-radius: 6px;
-                padding: 8px; color: #f5f7ff; font-size: 20px; font-weight: 700;
+                padding: 6px 8px; color: #f5f7ff; font-size: 18px; font-weight: 700;
             }
             QPushButton {
                 background: #2b3342; border: 1px solid #414b5f; border-radius: 6px;
